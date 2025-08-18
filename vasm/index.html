@@ -7,7 +7,7 @@
     -->
     <meta charset="utf-8">
     <title>HCx Series Visual Assembler</title>
-    <!-- Blockly本体の読み込み -->
+    <!-- Blockly本体の読み込み（オンライン版） -->
     <script src="https://unpkg.com/blockly/blockly.min.js"></script>
     <style>
       html, body { height: 100%; margin: 0; }
@@ -29,7 +29,10 @@
     </style>
   </head>
   <body>
-    <h3>独自CPU Scratch風アセンブラ (最小構成)</h3>
+    <h3>HCx シリーズ ビジュアルアセンブラ</h3>
+    <div style="margin-bottom: 10px;">
+      <button id="saveButton" onclick="saveAssemblyFile()">アセンブリファイルを保存</button>
+    </div>
     <!-- Blocklyエディタを置く場所 -->
     <div id="blocklyDiv"></div>
     <!-- 出力結果表示エリア -->
@@ -89,7 +92,7 @@
             init: function() {
               this.appendDummyInput()
                   .appendField(label)
-                  .appendField(new Blockly.FieldTextInput("LABEL"), "LABEL");
+                  .appendField(new Blockly.FieldTextInput("FLAG"), "FLAG");
               this.setPreviousStatement(true, null);
               this.setNextStatement(true, null);
               this.setColour(color);
@@ -120,6 +123,21 @@
                     ["R14", "R14"],
                     ["R15", "R15"]
                     ]), "REGISTER");
+              this.setPreviousStatement(true, null);
+              this.setNextStatement(true, null);
+              this.setColour(color);
+            }
+          };
+        }
+
+        function makeGotoBlock(type, label, color) {
+          Blockly.Blocks[type] = {
+            init: function() {
+              this.appendDummyInput()
+                  .appendField(label)
+                  .appendField(new Blockly.FieldDropdown(
+                    this.generateOptions()
+                  ));
               this.setPreviousStatement(true, null);
               this.setNextStatement(true, null);
               this.setColour(color);
@@ -192,9 +210,10 @@
           return 'LI #' + value + '\n';
         };
         Blockly.Assembly.forBlock['jp'] = function(block) {
-          var label = block.getFieldValue('LABEL');
-          return 'JP ' + label + '\n';
+          var flag = block.getFieldValue('FLAG');
+          return 'JP ' + flag + '\n';
         };
+        Blockly.Assembly.forBlock['sm'] = function(block) { return 'SM\n'; };
         Blockly.Assembly.forBlock['np'] = function(block) { return 'NP\n'; };
       Blockly.Assembly.init = function(workspace) {};
       Blockly.Assembly.finish = function(code) { return code; };
@@ -240,6 +259,43 @@
         outputDiv.scrollTop = outputDiv.scrollHeight;
       }
       workspace.addChangeListener(updateCode);
+
+      // アセンブリファイル保存機能
+      async function saveAssemblyFile() {
+        const code = Blockly.Assembly.workspaceToCode(workspace);
+        
+        if (!code || code.trim() === '') {
+          alert('保存するアセンブリコードがありません。ブロックを配置してください。');
+          return;
+        }
+
+        // Electronが利用可能かチェック
+        if (typeof window.electronAPI !== 'undefined') {
+          try {
+            const result = await window.electronAPI.saveAssemblyFile(code);
+            if (result.success) {
+              alert('ファイルが保存されました: ' + result.filePath);
+            } else if (result.canceled) {
+              // ユーザーがキャンセルした場合は何もしない
+            } else {
+              alert('ファイルの保存に失敗しました: ' + result.error);
+            }
+          } catch (error) {
+            alert('ファイル保存中にエラーが発生しました: ' + error.message);
+          }
+        } else {
+          // ブラウザ環境の場合はダウンロード機能を提供
+          const blob = new Blob([code], { type: 'text/plain' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'program.asm';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+      }
     </script>
   </body>
 </html>

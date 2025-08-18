@@ -1,0 +1,15 @@
+{
+  "name": "hcx-visual-assembler",
+  "version": "1.0.0",
+  "description": "HCx Series Visual Assembler using Blockly",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^latest"
+  }
+}
