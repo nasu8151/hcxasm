@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!--
+    これはHC4, 4e, HC8シリーズ用のビジュアルアセンブラです.
+    わかりやすいブロックによってアセンブリ言語を書くことができます.
+    -->
+    <meta charset="utf-8">
+    <title>HCx Series Visual Assembler</title>
+    <!-- Blockly本体の読み込み -->
+    <script src="https://unpkg.com/blockly/blockly.min.js"></script>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      #blocklyDiv { height: 70%; width: 100%; }
+      #output {
+        height: 180px;
+        width: 100%;
+        border-top: 1px solid #ccc;
+        font-family: monospace;
+        white-space: pre;
+        background: #fff;
+        overflow-y: auto;
+        box-sizing: border-box;
+      }
+      #blocklyDiv {
+        height: calc(100vh - 220px);
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>独自CPU Scratch風アセンブラ (最小構成)</h3>
+    <!-- Blocklyエディタを置く場所 -->
+    <div id="blocklyDiv"></div>
+    <!-- 出力結果表示エリア -->
+    <div id="output"></div>
+
+    <script>
+      // --- 独自ブロック定義 ---
+      Blockly.Blocks['li_immediate'] = {
+        init: function() {
+          this.appendDummyInput()
+              .appendField("LI #")
+              .appendField(new Blockly.FieldNumber(0, 0, 255), "VALUE");
+          this.setPreviousStatement(true, null);
+          this.setNextStatement(true, null);
+          this.setColour(210);
+        }
+      };
+
+      Blockly.Blocks['jp'] = {
+        init: function() {
+          this.appendDummyInput()
+              .appendField("JP")
+              .appendField(new Blockly.FieldTextInput("FLAG"), "FLAG");
+          this.setPreviousStatement(true, null);
+          this.setNextStatement(true, null);
+          this.setColour(120);
+        }
+      };
+        // --- DICTHC4命令すべてのブロック定義 ---
+        // 汎用: 引数なし
+        function makeNoArgBlock(type, label, color) {
+          Blockly.Blocks[type] = {
+            init: function() {
+              this.appendDummyInput().appendField(label);
+              this.setPreviousStatement(true, null);
+              this.setNextStatement(true, null);
+              this.setColour(color);
+            }
+          };
+        }
+        // 汎用: 即値
+        function makeImmBlock(type, label, color) {
+          Blockly.Blocks[type] = {
+            init: function() {
+              this.appendDummyInput()
+                  .appendField(label + ' #')
+                  .appendField(new Blockly.FieldNumber(0, 0, 255), "VALUE");
+              this.setPreviousStatement(true, null);
+              this.setNextStatement(true, null);
+              this.setColour(color);
+            }
+          };
+        }
+        // 汎用: ラベル
+        function makeLabelBlock(type, label, color) {
+          Blockly.Blocks[type] = {
+            init: function() {
+              this.appendDummyInput()
+                  .appendField(label)
+                  .appendField(new Blockly.FieldTextInput("LABEL"), "LABEL");
+              this.setPreviousStatement(true, null);
+              this.setNextStatement(true, null);
+              this.setColour(color);
+            }
+          };
+        }
+
+        function makeRegisterBlock(type, label, color) {
+          Blockly.Blocks[type] = {
+            init: function() {
+              this.appendDummyInput()
+                  .appendField(label)
+                  .appendField(new Blockly.FieldDropdown([
+                    ["R0", "R0"],
+                    ["R1", "R1"],
+                    ["R2", "R2"],
+                    ["R3", "R3"],
+                    ["R4", "R4"],
+                    ["R5", "R5"],
+                    ["R6", "R6"],
+                    ["R7", "R7"],
+                    ["R8", "R8"],
+                    ["R9", "R9"],
+                    ["R10", "R10"],
+                    ["R11", "R11"],
+                    ["R12", "R12"],
+                    ["R13", "R13"],
+                    ["R14", "R14"],
+                    ["R15", "R15"]
+                    ]), "REGISTER");
+              this.setPreviousStatement(true, null);
+              this.setNextStatement(true, null);
+              this.setColour(color);
+            }
+          };
+        }
+
+        // 命令ごとにブロックを定義
+        makeNoArgBlock('sm', 'SM', 60);
+        makeRegisterBlock('sc', 'SC', 65);
+        makeRegisterBlock('su', 'SU', 70);
+        makeRegisterBlock('ad', 'AD', 75);
+        makeRegisterBlock('xr', 'XR', 80);
+        makeRegisterBlock('or', 'OR', 85);
+        makeRegisterBlock('an', 'AN', 90);
+        makeRegisterBlock('sa', 'SA', 95);
+        makeNoArgBlock('lm', 'LM', 100);
+        makeRegisterBlock('ld', 'LD', 105);
+        makeImmBlock('li', 'LI', 110);
+        makeLabelBlock('jp', 'JP', 120);
+        makeNoArgBlock('np', 'NP', 125);
+
+      // --- コード生成ルール（独自アセンブリ出力） ---
+      Blockly.Assembly = new Blockly.Generator('Assembly');
+      Blockly.Assembly.PRECEDENCE = 0;
+      Blockly.Assembly.forBlock = Blockly.Assembly.forBlock || {};
+      Blockly.Assembly.forBlock['li_immediate'] = function(block) {
+        var value = block.getFieldValue('VALUE');
+        return 'LI #' + value + '\n';
+      };
+      Blockly.Assembly.forBlock['jp'] = function(block) {
+        var flag = block.getFieldValue('FLAG');
+        return 'JP ' + flag + '\n';
+      };
+        Blockly.Assembly.forBlock['sc'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'SC ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['su'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'SU ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['ad'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'AD ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['xr'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'XR ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['or'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'OR ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['an'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'AN ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['sa'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'SA ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['ld'] = function(block) {
+          var reg = block.getFieldValue('REGISTER');
+          return 'LD ' + reg + '\n';
+        };
+        Blockly.Assembly.forBlock['lm'] = function(block) { return 'LM\n'; };
+        Blockly.Assembly.forBlock['li'] = function(block) {
+          var value = block.getFieldValue('VALUE');
+          return 'LI #' + value + '\n';
+        };
+        Blockly.Assembly.forBlock['jp'] = function(block) {
+          var label = block.getFieldValue('LABEL');
+          return 'JP ' + label + '\n';
+        };
+        Blockly.Assembly.forBlock['np'] = function(block) { return 'NP\n'; };
+      Blockly.Assembly.init = function(workspace) {};
+      Blockly.Assembly.finish = function(code) { return code; };
+      Blockly.Assembly.scrub_ = function(block, code) {
+        var nextBlock = block.nextConnection && block.nextConnection.targetBlock();
+        var nextCode = nextBlock ? Blockly.Assembly.blockToCode(nextBlock) : '';
+        return code + nextCode;
+      };
+
+      // --- ツールボックス（新しいJSON形式） ---
+  // toolboxはDICTHC4命令用のみ定義
+        const toolbox = {
+          "kind": "flyoutToolbox",
+          "contents": [
+            { "kind": "block", "type": "sm" },
+            { "kind": "block", "type": "sc" },
+            { "kind": "block", "type": "su" },
+            { "kind": "block", "type": "ad" },
+            { "kind": "block", "type": "xr" },
+            { "kind": "block", "type": "or" },
+            { "kind": "block", "type": "an" },
+            { "kind": "block", "type": "sa" },
+            { "kind": "block", "type": "lm" },
+            { "kind": "block", "type": "ld" },
+            { "kind": "block", "type": "li" },
+            { "kind": "block", "type": "jp" },
+            { "kind": "block", "type": "np" }
+          ]
+        };
+
+      // --- Blockly初期化 ---
+      var workspace = Blockly.inject('blocklyDiv', {
+        toolbox: toolbox
+      });
+
+      // --- 変更があるたびにコード生成して出力 ---
+      function updateCode() {
+        var code = Blockly.Assembly.workspaceToCode(workspace);
+        console.log('[DEBUG] 生成されたコード:', code);
+        var outputDiv = document.getElementById('output');
+        outputDiv.textContent = code;
+        // スクロールして常に最新のコードが見えるようにする
+        outputDiv.scrollTop = outputDiv.scrollHeight;
+      }
+      workspace.addChangeListener(updateCode);
+    </script>
+  </body>
+</html>
