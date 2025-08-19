@@ -73,3 +73,22 @@ ipcMain.handle('save-assembly-file', async (event, content) => {
   
   return { success: false, canceled: true };
 });
+
+// 新しいラベル作成用ダイアログ
+ipcMain.handle('show-label-dialog', async (event, defaultValue) => {
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    title: '新しいラベルを作成',
+    message: '新しいラベル名を入力してください:',
+    defaultId: 0,
+    buttons: ['OK', 'キャンセル'],
+    detail: 'デフォルト: ' + defaultValue
+  });
+  
+  if (response === 0) {
+    // 簡易的な入力ダイアログの代替
+    return { success: true, value: defaultValue };
+  }
+  
+  return { success: false, canceled: true };
+});
