@@ -328,6 +328,7 @@
         Blockly.Assembly.forBlock['sm'] = function(block) { return 'SM\n'; };
         Blockly.Assembly.forBlock['np'] = function(block) { return 'NP\n'; };
 
+        
         // GOTO用コード生成ルール
         
         Blockly.Assembly.forBlock['goto'] = function(block) {
@@ -346,11 +347,160 @@
         return code + nextCode;
       };
 
+      // 汎用: ラベルブロック（ラベルの定義用）
+      function makeLabelDefinitionBlock(type, label, color) {
+        Blockly.Blocks[type] = {
+          init: function() {
+            this.appendDummyInput()
+                .appendField(label)
+                .appendField(new Blockly.FieldDropdown(this.getLabelOptions.bind(this)), "LABEL")
+                .appendField(":");
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(color);
+          },
+          
+          getLabelOptions: function() {
+            // 既存のラベルオプションを取得
+            var options = [];
+            
+            // デフォルトのラベル
+            if (window.customLabels && window.customLabels.length > 0) {
+              window.customLabels.forEach(function(label) {
+                options.push([label, label]);
+              });
+              console.log('[DEBUG] customLabels found:', window.customLabels);
+            } else {
+              options.push(['START', 'START']);
+              console.log('[DEBUG] using default START label');
+            }
+            
+            // 「新しいラベルを作成」オプションを追加
+            options.push(['新しいラベルを作成...', 'CREATE_NEW']);
+            console.log('[DEBUG] final options:', options);
+            
+            return options;
+          },
+          
+          onchange: function(event) {
+            console.log('[DEBUG] label definition onchange event triggered:', event);
+            if (event.type === Blockly.Events.BLOCK_CHANGE && 
+                event.blockId === this.id && 
+                event.element === 'field' && 
+                event.name === 'LABEL') {
+              
+              console.log('[DEBUG] LABEL field change detected, newValue:', event.newValue);
+              if (event.newValue === 'CREATE_NEW') {
+                console.log('[DEBUG] CREATE_NEW selected, creating new label...');
+                // 新しいラベル作成処理
+                setTimeout(() => {
+                  this.createNewLabel();
+                }, 10);
+              }
+            }
+          },
+          
+          createNewLabel: function() {
+            console.log('[DEBUG] createNewLabel called for label definition');
+            
+            // 現在のブロックインスタンスを保存
+            window.currentLabelBlock = this;
+            
+            // ダイアログを表示
+            var dialog = document.getElementById('labelDialog');
+            var input = document.getElementById('labelInput');
+            input.value = 'LABEL' + (Date.now() % 1000);
+            dialog.style.display = 'block';
+            input.focus();
+            input.select();
+          },
+          
+          handleNewLabel: function(newLabel) {
+            if (newLabel && newLabel.trim) {
+              newLabel = newLabel.trim().toUpperCase();
+              console.log('[DEBUG] processed label:', newLabel);
+              
+              // カスタムラベルリストを初期化（存在しない場合）
+              if (!window.customLabels) {
+                window.customLabels = ['START'];
+                console.log('[DEBUG] initialized customLabels');
+              }
+              
+              // 重複チェック
+              if (window.customLabels.indexOf(newLabel) === -1) {
+                window.customLabels.push(newLabel);
+                console.log('[DEBUG] added new label, customLabels now:', window.customLabels);
+              } else {
+                console.log('[DEBUG] label already exists');
+              }
+              
+              // すべてのラベル関連ブロックのドロップダウンを更新
+              this.updateAllLabelBlocks();
+              
+              // 現在のブロックの値を新しいラベルに設定
+              var field = this.getField('LABEL');
+              if (field) {
+                // メニューを再生成してから値を設定
+                field.menuGenerator_ = this.getLabelOptions.bind(this);
+                field.setValue(newLabel);
+                console.log('[DEBUG] field value set to:', newLabel);
+              }
+            } else {
+              console.log('[DEBUG] user cancelled or empty input');
+              // キャンセルまたは空の場合、最初のラベルに戻す
+              var field = this.getField('LABEL');
+              if (field && window.customLabels && window.customLabels.length > 0) {
+                field.setValue(window.customLabels[0]);
+                console.log('[DEBUG] reset to first label:', window.customLabels[0]);
+              }
+            }
+          },
+          
+          updateAllLabelBlocks: function() {
+            console.log('[DEBUG] updateAllLabelBlocks called from label definition');
+            // ワークスペース内のすべてのラベル関連ブロックを更新
+            var workspace = this.workspace;
+            var allBlocks = workspace.getAllBlocks();
+            var self = this;
+            console.log('[DEBUG] found', allBlocks.length, 'blocks in workspace');
+            
+            allBlocks.forEach(function(block) {
+              // ラベル定義ブロックとGOTOブロック両方を更新
+              if ((block.type === self.type || block.type === 'jp' || block.type === 'goto') && block !== self) {
+                console.log('[DEBUG] updating block:', block.id);
+                var field = block.getField('LABEL');
+                if (field) {
+                  // メニューを強制的に再生成
+                  field.menuGenerator_ = block.getLabelOptions.bind(block);
+                  console.log('[DEBUG] updated menuGenerator for block:', block.id);
+                }
+              }
+            });
+          }
+        };
+      }
+      
+      // ブロック定義を実行
+      makeFlagBlock('jp', 'JP', 90);
+      makeNoArgBlock('sm', 'SM', 0);
+      makeNoArgBlock('np', 'NP', 0);
+
+      // ラベル定義ブロックを作成
+      makeLabelDefinitionBlock('label_def', 'ラベル', 120);
+      
+      // ラベル定義ブロック用のコード生成ルール
+      Blockly.Assembly.forBlock['label_def'] = function(block) {
+        var label = block.getFieldValue('LABEL');
+        return label + ':\n';
+      };
+      
       // --- ツールボックス（新しいJSON形式） ---
   // toolboxはDICTHC4命令用のみ定義
         const toolbox = {
           "kind": "flyoutToolbox",
           "contents": [
+            { "kind": "block", "type": "label_def" },
+            { "kind": "sep", "gap": "12" },
             { "kind": "block", "type": "sm" },
             { "kind": "block", "type": "sc" },
             { "kind": "block", "type": "su" },
