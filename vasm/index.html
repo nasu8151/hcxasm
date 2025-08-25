@@ -259,6 +259,144 @@
         };
       }
 
+      function makeConditionalGotoBlock(type, label, color) {
+        Blockly.Blocks[type] = {
+          init: function() {
+            this.appendDummyInput()
+                .appendField(label)
+                .appendField(new Blockly.FieldDropdown([
+                  ["C", "C"],
+                  ["NC", "NC"],
+                  ["Z", "Z"],
+                  ["NZ", "NZ"]
+                ]), "FLAG")
+                .appendField(new Blockly.FieldDropdown(this.getLabelOptions.bind(this)), "LABEL");
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(color);
+          },
+          
+          getLabelOptions: function() {
+            console.log('[DEBUG] conditional goto getLabelOptions called');
+            // 既存のラベルオプションを取得
+            var options = [];
+            
+            // デフォルトのラベル
+            if (window.customLabels && window.customLabels.length > 0) {
+              window.customLabels.forEach(function(label) {
+                options.push([label, label]);
+              });
+              console.log('[DEBUG] customLabels found:', window.customLabels);
+            } else {
+              options.push(['START', 'START']);
+              console.log('[DEBUG] using default START label');
+            }
+            
+            // 「新しいラベルを作成」オプションを追加
+            options.push(['新しいラベルを作成...', 'CREATE_NEW']);
+            console.log('[DEBUG] final options:', options);
+            
+            return options;
+          },
+          
+          onchange: function(event) {
+            console.log('[DEBUG] conditional goto onchange event triggered:', event);
+            if (event.type === Blockly.Events.BLOCK_CHANGE && 
+                event.blockId === this.id && 
+                event.element === 'field' && 
+                event.name === 'LABEL') {
+              
+              console.log('[DEBUG] LABEL field change detected, newValue:', event.newValue);
+              if (event.newValue === 'CREATE_NEW') {
+                console.log('[DEBUG] CREATE_NEW selected, creating new label...');
+                // 新しいラベル作成処理
+                setTimeout(() => {
+                  this.createNewLabel();
+                }, 10);
+              }
+            }
+          },
+          
+          createNewLabel: function() {
+            console.log('[DEBUG] createNewLabel called for conditional goto');
+            
+            // 現在のブロックインスタンスを保存
+            window.currentLabelBlock = this;
+            
+            // ダイアログを表示
+            var dialog = document.getElementById('labelDialog');
+            var input = document.getElementById('labelInput');
+            input.value = 'LABEL' + (Date.now() % 1000);
+            dialog.style.display = 'block';
+            input.focus();
+            input.select();
+          },
+          
+          handleNewLabel: function(newLabel) {
+            if (newLabel && newLabel.trim) {
+              newLabel = newLabel.trim().toUpperCase();
+              console.log('[DEBUG] processed label:', newLabel);
+              
+              // カスタムラベルリストを初期化（存在しない場合）
+              if (!window.customLabels) {
+                window.customLabels = ['START'];
+                console.log('[DEBUG] initialized customLabels');
+              }
+              
+              // 重複チェック
+              if (window.customLabels.indexOf(newLabel) === -1) {
+                window.customLabels.push(newLabel);
+                console.log('[DEBUG] added new label, customLabels now:', window.customLabels);
+              } else {
+                console.log('[DEBUG] label already exists');
+              }
+              
+              // すべてのラベル関連ブロックのドロップダウンを更新
+              this.updateAllLabelBlocks();
+              
+              // 現在のブロックの値を新しいラベルに設定
+              var field = this.getField('LABEL');
+              if (field) {
+                // メニューを再生成してから値を設定
+                field.menuGenerator_ = this.getLabelOptions.bind(this);
+                field.setValue(newLabel);
+                console.log('[DEBUG] field value set to:', newLabel);
+              }
+            } else {
+              console.log('[DEBUG] user cancelled or empty input');
+              // キャンセルまたは空の場合、最初のラベルに戻す
+              var field = this.getField('LABEL');
+              if (field && window.customLabels && window.customLabels.length > 0) {
+                field.setValue(window.customLabels[0]);
+                console.log('[DEBUG] reset to first label:', window.customLabels[0]);
+              }
+            }
+          },
+          
+          updateAllLabelBlocks: function() {
+            console.log('[DEBUG] updateAllLabelBlocks called from conditional goto');
+            // ワークスペース内のすべてのラベル関連ブロックを更新
+            var workspace = this.workspace;
+            var allBlocks = workspace.getAllBlocks();
+            var self = this;
+            console.log('[DEBUG] found', allBlocks.length, 'blocks in workspace');
+            
+            allBlocks.forEach(function(block) {
+              // ラベル関連ブロックを更新
+              if ((block.type === 'goto' || block.type === 'goto_if' || block.type === 'label_def') && block !== self) {
+                console.log('[DEBUG] updating block:', block.id);
+                var field = block.getField('LABEL');
+                if (field) {
+                  // メニューを強制的に再生成
+                  field.menuGenerator_ = block.getLabelOptions.bind(block);
+                  console.log('[DEBUG] updated menuGenerator for block:', block.id);
+                }
+              }
+            });
+          }
+        };
+      }
+
       // カスタムラベルを初期化
       window.customLabels = ['START', 'LOOP', 'END'];
 
@@ -279,6 +417,9 @@
 
       // GOTO疑似命令
       makeGotoBlock('goto', 'GOTO', 130);
+      
+      // 条件付きGOTO疑似命令
+      makeConditionalGotoBlock('goto_if', 'GOTO IF', 135);
 
       // --- コード生成ルール（独自アセンブリ出力） ---
       Blockly.Assembly = new Blockly.Generator('Assembly');
@@ -337,6 +478,16 @@
                   'LI #' + label + ':1\n' +
                   'LI #' + label + ':0\n' +
                   'JP\n';
+        };
+        
+        // 条件付きGOTO用コード生成ルール
+        Blockly.Assembly.forBlock['goto_if'] = function(block) {
+          var label = block.getFieldValue('LABEL');
+          var flag = block.getFieldValue('FLAG');
+          return  'LI #' + label + ':2\n' +
+                  'LI #' + label + ':1\n' +
+                  'LI #' + label + ':0\n' +
+                  'JP ' + flag + '\n';
         };
         
       Blockly.Assembly.init = function(workspace) {};
@@ -514,7 +665,8 @@
             { "kind": "block", "type": "li" },
             { "kind": "block", "type": "jp" },
             { "kind": "block", "type": "np" },
-            { "kind": "block", "type": "goto" }
+            { "kind": "block", "type": "goto" },
+            { "kind": "block", "type": "goto_if" }
           ]
         };
 
