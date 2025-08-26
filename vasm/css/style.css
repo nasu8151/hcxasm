@@ -1,0 +1,54 @@
+/**
+ * HCx Series Visual Assembler - Styles
+ * ビジュアルアセンブラのCSS
+ */
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+/* メインコンテナ */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ヘッダー部分 */
+h3 {
+  margin: 10px 0;
+  padding: 0 10px;
+  flex-shrink: 0;
+}
+
+/* ボタンエリア */
+div[style*="margin-bottom"] {
+  flex-shrink: 0;
+  padding: 0 10px;
+}
+
+/* Blocklyエディタエリア */
+#blocklyDiv {
+  flex: 1;
+  width: 100%;
+  min-height: 400px;
+  border-bottom: 2px solid #ccc;
+}
+
+/* 出力結果表示エリア */
+#output {
+  height: 180px;
+  width: 100%;
+  border: none;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  white-space: pre;
+  background: #f8f8f8;
+  overflow-y: auto;
+  overflow-x: auto;
+  box-sizing: border-box;
+  padding: 10px;
+  flex-shrink: 0;
+  resize: vertical;
+}
