@@ -74,7 +74,7 @@ def parse_oprand(opcode:str, parts:list[str]) -> int|ValueError:
     """Check if the arguments of the instruction match the expected types."""
     ARG_TYPE = {
         "SM": dict.inst_type.STACK_INDIRECT, "SC": dict.inst_type.REGISTER, "SU": dict.inst_type.REGISTER, "AD": dict.inst_type.REGISTER, "XR": dict.inst_type.REGISTER, "OR": dict.inst_type.REGISTER, "AN": dict.inst_type.REGISTER, "SA": dict.inst_type.REGISTER,
-        "LM": dict.inst_type.IMMEDIATE, "LD": dict.inst_type.REGISTER, "LI": dict.inst_type.IMMEDIATE, "LS": dict.inst_type.IMMEDIATE, "JP": dict.inst_type.JUMP, "NP": dict.inst_type.INHERENT
+        "LM": dict.inst_type.STACK_INDIRECT, "LD": dict.inst_type.REGISTER, "LI": dict.inst_type.IMMEDIATE, "LS": dict.inst_type.IMMEDIATE, "JP": dict.inst_type.JUMP, "NP": dict.inst_type.INHERENT
     }
 
     JUMP_CONDITION = {
