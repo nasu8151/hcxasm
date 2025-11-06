@@ -48,6 +48,45 @@ async function saveAssemblyFile() {
   }
 }
 
+// バイナリエクスポート機能
+async function exportAssembledBinary() {
+  if (!window.vasmWorkspace) {
+    alert('ワークスペースが初期化されていません。');
+    return;
+  }
+  
+  const code = Blockly.Assembly.workspaceToCode(window.vasmWorkspace);
+  
+  if (!code || code.trim() === '') {
+    alert('エクスポートするアセンブリコードがありません。ブロックを配置してください。');
+    return;
+  }
+
+  // Electronが利用可能かチェック
+  if (typeof window.electronAPI !== 'undefined') {
+    try {
+      // 処理中であることを表示
+      console.log('[INFO] アセンブル中...');
+      
+      const result = await window.electronAPI.exportAssembledBinary(code);
+      
+      if (result.success) {
+        alert('バイナリファイルが生成されました: ' + result.filePath + 
+              (result.output ? '\n\n出力:\n' + result.output : ''));
+      } else if (result.canceled) {
+        // ユーザーがキャンセルした場合は何もしない
+      } else {
+        alert('バイナリの生成に失敗しました:\n' + result.error);
+      }
+    } catch (error) {
+      alert('バイナリエクスポート中にエラーが発生しました: ' + error.message);
+    }
+  } else {
+    // ブラウザ環境では利用不可
+    alert('バイナリエクスポート機能はElectronアプリでのみ利用できます。');
+  }
+}
+
 // ブロック保存機能
 async function saveBlocksFile(saveAs = false) {
   if (!window.vasmWorkspace) {
@@ -187,6 +226,9 @@ function handleMenuAction(action, data) {
       break;
     case 'export-assembly':
       saveAssemblyFile();
+      break;
+    case 'export-binary':
+      exportAssembledBinary();
       break;
     default:
       console.log('Unknown menu action:', action);

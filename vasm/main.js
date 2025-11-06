@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 // メニューテンプレートを作成
 function createMenu(mainWindow) {
@@ -78,6 +79,14 @@ function createMenu(mainWindow) {
           click: () => {
             // アセンブリとしてエクスポート
             mainWindow.webContents.send('menu-action', 'export-assembly');
+          }
+        },
+        {
+          label: 'Export Assembled Binary',
+          accelerator: 'CmdOrCtrl+Alt+S',
+          click: () => {
+            // アセンブルしてバイナリをエクスポート
+            mainWindow.webContents.send('menu-action', 'export-binary');
           }
         }
       ]
@@ -230,4 +239,113 @@ ipcMain.handle('show-label-dialog', async (event, defaultValue) => {
   }
   
   return { success: false, canceled: true };
+});
+
+// バイナリエクスポート用IPCハンドラ
+ipcMain.handle('export-assembled-binary', async (event, assemblyCode) => {
+  // バイナリファイルの保存先を選択
+  const result = await dialog.showSaveDialog({
+    title: 'アセンブルされたバイナリファイルを保存',
+    defaultPath: 'program.bin',
+    filters: [
+      { name: 'Binary Files', extensions: ['bin'] },
+      { name: 'Hex Files', extensions: ['hex'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+
+  if (result.canceled || !result.filePath) {
+    return { success: false, canceled: true };
+  }
+
+  try {
+    // 一時的なアセンブリファイルを作成
+    const tempAsmPath = path.join(__dirname, '..', 'temp_assembly.asm');
+    fs.writeFileSync(tempAsmPath, assemblyCode, 'utf8');
+
+    // hcxasm.pyのパスを取得
+    const hcxasmPath = path.join(__dirname, '..', 'hcxasm.py');
+    
+    // hcxasm.pyが存在するかチェック
+    if (!fs.existsSync(hcxasmPath)) {
+      // 一時ファイルを削除
+      fs.unlinkSync(tempAsmPath);
+      return { 
+        success: false, 
+        error: 'hcxasm.pyが見つかりません。パス: ' + hcxasmPath 
+      };
+    }
+
+    // hcxasm.pyを実行してアセンブル
+    return new Promise((resolve) => {
+      // ファイル拡張子に基づいて出力形式を決定
+      const fileExt = path.extname(result.filePath).toLowerCase();
+      const args = [hcxasmPath, tempAsmPath, '-o', result.filePath];
+      
+      // 拡張子に応じて形式オプションを追加
+      if (fileExt === '.hex') {
+        args.push('-f', 'ihex');
+      } else if (fileExt === '.txt') {
+        args.push('-f', 'text');
+      }
+      // .binの場合はデフォルトのbinary形式なので何も追加しない
+      
+      const pythonProcess = spawn('py', args, {
+        cwd: path.dirname(hcxasmPath)
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      pythonProcess.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      pythonProcess.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      pythonProcess.on('close', (code) => {
+        // 一時ファイルを削除
+        try {
+          fs.unlinkSync(tempAsmPath);
+        } catch (e) {
+          console.error('一時ファイルの削除に失敗:', e);
+        }
+
+        if (code === 0) {
+          resolve({ 
+            success: true, 
+            filePath: result.filePath,
+            output: stdout 
+          });
+        } else {
+          resolve({ 
+            success: false, 
+            error: `アセンブルに失敗しました (終了コード: ${code})\n${stderr || stdout}` 
+          });
+        }
+      });
+
+      pythonProcess.on('error', (err) => {
+        // 一時ファイルを削除
+        try {
+          fs.unlinkSync(tempAsmPath);
+        } catch (e) {
+          console.error('一時ファイルの削除に失敗:', e);
+        }
+        
+        resolve({ 
+          success: false, 
+          error: 'Pythonの実行に失敗しました: ' + err.message 
+        });
+      });
+    });
+
+  } catch (error) {
+    return { 
+      success: false, 
+      error: 'ファイル操作に失敗しました: ' + error.message 
+    };
+  }
 });
