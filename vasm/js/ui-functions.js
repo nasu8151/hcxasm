@@ -6,6 +6,27 @@
 // 現在のファイルパス（Save機能用）
 let currentFilePath = null;
 
+// 出力タブにメッセージを表示する関数
+function addOutputMessage(message, type = 'info') {
+  const messageOutput = document.getElementById('messageOutput');
+  if (!messageOutput) return;
+  
+  const timestamp = new Date().toLocaleTimeString();
+  const prefix = type === 'error' ? '[ERROR]' : type === 'warning' ? '[WARNING]' : '[INFO]';
+  const formattedMessage = `${timestamp} ${prefix} ${message}\n`;
+  
+  messageOutput.textContent += formattedMessage;
+  messageOutput.scrollTop = messageOutput.scrollHeight; // 最下部にスクロール
+}
+
+// 出力タブをクリアする関数
+function clearOutputMessages() {
+  const messageOutput = document.getElementById('messageOutput');
+  if (messageOutput) {
+    messageOutput.textContent = '';
+  }
+}
+
 // アセンブリファイル保存機能
 async function saveAssemblyFile() {
   if (!window.vasmWorkspace) {
@@ -25,13 +46,16 @@ async function saveAssemblyFile() {
     try {
       const result = await window.electronAPI.saveAssemblyFile(code);
       if (result.success) {
+        addOutputMessage(`アセンブリファイルが保存されました: ${result.filePath}`);
         alert('ファイルが保存されました: ' + result.filePath);
       } else if (result.canceled) {
-        // ユーザーがキャンセルした場合は何もしない
+        addOutputMessage('アセンブリファイルの保存がキャンセルされました');
       } else {
+        addOutputMessage(`アセンブリファイルの保存に失敗しました: ${result.error}`, 'error');
         alert('ファイルの保存に失敗しました: ' + result.error);
       }
     } catch (error) {
+      addOutputMessage(`アセンブリファイル保存中にエラーが発生しました: ${error.message}`, 'error');
       alert('ファイル保存中にエラーが発生しました: ' + error.message);
     }
   } else {
@@ -66,19 +90,26 @@ async function exportAssembledBinary() {
   if (typeof window.electronAPI !== 'undefined') {
     try {
       // 処理中であることを表示
+      addOutputMessage('アセンブル処理を開始します...');
       console.log('[INFO] アセンブル中...');
       
       const result = await window.electronAPI.exportAssembledBinary(code);
       
       if (result.success) {
-        alert('バイナリファイルが生成されました: ' + result.filePath + 
-              (result.output ? '\n\n出力:\n' + result.output : ''));
+        addOutputMessage(`バイナリファイルが生成されました: ${result.filePath}`);
+        if (result.output) {
+          addOutputMessage('hcxasm.py の出力:');
+          addOutputMessage(result.output.trim());
+        }
+        alert('バイナリファイルが生成されました: ' + result.filePath);
       } else if (result.canceled) {
-        // ユーザーがキャンセルした場合は何もしない
+        addOutputMessage('バイナリエクスポートがキャンセルされました');
       } else {
+        addOutputMessage(`バイナリの生成に失敗しました: ${result.error}`, 'error');
         alert('バイナリの生成に失敗しました:\n' + result.error);
       }
     } catch (error) {
+      addOutputMessage(`バイナリエクスポート中にエラーが発生しました: ${error.message}`, 'error');
       alert('バイナリエクスポート中にエラーが発生しました: ' + error.message);
     }
   } else {
@@ -104,10 +135,12 @@ async function saveBlocksFile(saveAs = false) {
     
     if (result.success) {
       currentFilePath = result.filePath;
+      addOutputMessage(`ブロックファイルが保存されました: ${result.filePath}`);
       alert('ブロックファイルが保存されました: ' + result.filePath);
     } else if (result.canceled) {
-      // ユーザーがキャンセルした場合は何もしない
+      addOutputMessage('ブロックファイルの保存がキャンセルされました');
     } else {
+      addOutputMessage(`ブロックファイルの保存に失敗しました: ${result.error}`, 'error');
       alert('ブロックファイルの保存に失敗しました: ' + result.error);
     }
   } catch (error) {
@@ -130,8 +163,10 @@ function loadBlocksFile(content) {
     const data = JSON.parse(content);
     Blockly.serialization.workspaces.load(data, window.vasmWorkspace);
     
+    addOutputMessage('ブロックファイルが読み込まれました');
     console.log('[INFO] ブロックファイルが読み込まれました');
   } catch (error) {
+    addOutputMessage(`ブロックファイルの読み込みに失敗しました: ${error.message}`, 'error');
     alert('ブロックファイルの読み込みに失敗しました: ' + error.message);
   }
 }
@@ -146,6 +181,8 @@ function newWorkspace() {
   if (confirm('現在の作業内容が失われます。新しいワークスペースを作成しますか？')) {
     window.vasmWorkspace.clear();
     currentFilePath = null;
+    clearOutputMessages(); // 出力メッセージもクリア
+    addOutputMessage('新しいワークスペースが作成されました');
     console.log('[INFO] 新しいワークスペースが作成されました');
   }
 }
@@ -216,6 +253,7 @@ function handleMenuAction(action, data) {
       if (data && data.content) {
         loadBlocksFile(data.content);
         currentFilePath = data.filePath;
+        addOutputMessage(`ブロックファイルを開きました: ${data.filePath}`);
       }
       break;
     case 'save':

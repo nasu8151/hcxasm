@@ -13,14 +13,26 @@
     <link rel="stylesheet" href="css/style.css">
   </head>
   <body>
-    <h3>HCx シリーズ ビジュアルアセンブラ</h3>
-    <div style="margin-bottom: 10px;">
+    <div style="margin-bottom: 10px; margin-top: 10px;">
       <button id="saveButton" onclick="saveAssemblyFile()">アセンブリファイルを保存</button>
     </div>
     <!-- Blocklyエディタを置く場所 -->
     <div id="blocklyDiv"></div>
-    <!-- 出力結果表示エリア -->
-    <div id="output">生成されたアセンブリコードがここに表示されます...</div>
+    <!-- 出力結果表示エリア（タブ構造） -->
+    <div id="outputContainer">
+      <div class="tab-header">
+        <button class="tab-button active" onclick="switchTab('assembly')">アセンブリ</button>
+        <button class="tab-button" onclick="switchTab('output')">出力</button>
+      </div>
+      <div class="tab-content">
+        <div id="assemblyTab" class="tab-pane active">
+          <div id="output">生成されたアセンブリコードがここに表示されます...</div>
+        </div>
+        <div id="outputTab" class="tab-pane">
+          <div id="messageOutput">出力メッセージがここに表示されます...</div>
+        </div>
+      </div>
+    </div>
 
     <!-- ラベル入力ダイアログ -->
     <div id="labelDialog" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 9999;">
@@ -34,6 +46,25 @@
         </div>
       </div>
     </div>
+
+    <!-- タブ切り替え機能 -->
+    <script>
+      function switchTab(tabName) {
+        // すべてのタブボタンとタブペインから active クラスを削除
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const tabPanes = document.querySelectorAll('.tab-pane');
+        
+        tabButtons.forEach(button => button.classList.remove('active'));
+        tabPanes.forEach(pane => pane.classList.remove('active'));
+        
+        // 選択されたタブをアクティブにする
+        const activeButton = document.querySelector(`[onclick="switchTab('${tabName}')"]`);
+        const activePane = document.getElementById(tabName + 'Tab');
+        
+        if (activeButton) activeButton.classList.add('active');
+        if (activePane) activePane.classList.add('active');
+      }
+    </script>
 
     <!-- ビジュアルアセンブラ本体コード -->
     <script src="js/visual-assembler.js"></script>
