@@ -1,5 +1,149 @@
 import dictionaly as dict
 import re
+from typing import Optional
+from enum import Enum, auto
+
+class TokenType(Enum):
+    """Enum for token types."""
+    LABEL = auto()
+    INSTRUCTION = auto()
+    MACRO = auto()
+    DIRECTIVE = auto()
+    OPERAND = auto()
+    COMMENT = auto()
+
+class TokenObject:
+    """Represents a token object with a type and value."""
+    def __init__(self, toktype:TokenType, value:str, linenum:int, next:Optional['TokenObject']=None):
+        self.toktype = toktype
+        self.value = value
+        self.linenum = linenum
+        self.next = next
+    def __repr__(self):
+        return f"Token(type={self.toktype}, value={self.value}, linenum={self.linenum})"
+    
+class LinkedList:
+    """A linked list to hold tokens."""
+    def __init__(self):
+        self.head: Optional[TokenObject] = None
+        self.tail: Optional[TokenObject] = None
+
+    def append(self, toktype:TokenType, value:str, linenum:int):
+        """Append a new token to the linked list."""
+        new_token = TokenObject(toktype, value, linenum)
+        if self.head is None:
+            self.head = new_token
+            self.tail = new_token
+        else:
+            assert self.tail is not None  # for type checker
+            self.tail.next = new_token
+            self.tail = new_token
+    
+    def consume(self, toktype:TokenType) -> Optional[str]:
+        """Consume a token of the given type and return its value, or None if the current token does not match."""
+        if self.current is None:
+            return None
+        if self.current.toktype == toktype:
+            value = self.current.value
+            self.current = self.current.next
+            return value
+        return None
+    
+    def peek_head(self) -> Optional[TokenObject]:
+        """Return the head token without consuming it."""
+        return self.head
+    
+    def getline(self, linenum:int) -> list[str]:
+        """Return the value of the token at the given line number."""
+        current = self.head
+        result = []
+        while current is not None:
+            if current.linenum == linenum:
+                result.append(current.value)
+            current = current.next
+        return result
+    
+    def parse_label(self, labelobj:dict.LabelObject):
+        current = self.head
+        while current is not None:
+            if current.toktype == TokenType.OPERAND:
+                val = re.split(r'[#: ]*', current.value)
+                if len(val) == 2:
+                    label_name = val[0]
+                    slice_notation = int(val[1])  # e.g., ':0' or ':2'
+                    if label_name == labelobj.name:
+                        current.value = str(
+                            labelobj.address >> (slice_notation * 4) & 0x0F)
+            current = current.next
+
+
+
+
+    def assembletokens(self, architecture:str) -> list[dict.ListObject]:
+        """Assemble the tokens into a list of ListObjects."""
+        assembled_lines:list[dict.ListObject] = []
+        current = self.head
+        address_counter = 0
+        while current is not None:
+            line_number = current.linenum
+            if current.toktype == TokenType.COMMENT:
+                # Skip comments
+                current = current.next
+                continue
+            elif current.toktype == TokenType.LABEL:
+                label_name = current.value[:-1]  # Remove the colon
+                label_obj = dict.LabelObject(name=label_name, line=line_number, address=address_counter)
+                self.parse_label(label_obj) # Resolve label references in operands
+                assembled_lines.append(dict.ListObject(
+                    label=label_obj,
+                    address=address_counter,
+                    machinecode=None,
+                    linenum=line_number,
+                    source=self.getline(line_number),
+                    error=None
+                ))
+                current = current.next
+            elif current.toktype == TokenType.INSTRUCTION:
+                instruction = current.value
+                opcode = dict.AssemblyDictionary(architecture).get_instruction(instruction.upper())
+                
+
+
+    def __repr__(self):
+        tokens = []
+        current = self.head
+        while current is not None:
+            tokens.append(repr(current))
+            current = current.next
+        return " -> ".join(tokens)
+
+    def __iter__(self):
+        current = self.head
+        while current is not None:
+            yield current
+            current = current.next
+
+def tokenize_lines(lines:list[str], architecture:str) -> LinkedList:
+    head = LinkedList()
+    for i in range(len(lines)):
+        line_num = i + 1
+        elements = lines[i].strip().split()
+        for j in range(len(elements)):
+            elem = elements[j]
+            if re.match(dict.LABEL_PATTERN, elem):
+                head.append(TokenType.LABEL, elem, line_num)
+            elif elem.upper() in dict.AssemblyDictionary(architecture).instructions:
+                head.append(TokenType.INSTRUCTION, elem, line_num)
+            elif elem.startswith(';') or elem.startswith('//'):
+                head.append(TokenType.COMMENT, " ".join(elements[j:]), line_num)
+                break  # Rest of the line is comment
+            elif elem.upper() == '.MACRO':
+                head.append(TokenType.MACRO, elem, line_num)
+            elif elem.startswith('.'):
+                head.append(TokenType.DIRECTIVE, elem, line_num)
+            else:
+                head.append(TokenType.OPERAND, elem, line_num)
+    return head
 
 def assembleline(line:str, line_number:int, architecture:str = "HC4") -> dict.ListObject:
     # Remove comments first
@@ -73,8 +217,8 @@ def assembleline(line:str, line_number:int, architecture:str = "HC4") -> dict.Li
 def parse_oprand(opcode:str, parts:list[str]) -> int|ValueError:
     """Check if the arguments of the instruction match the expected types."""
     ARG_TYPE = {
-        "SM": dict.inst_type.STACK_INDIRECT, "SC": dict.inst_type.REGISTER, "SU": dict.inst_type.REGISTER, "AD": dict.inst_type.REGISTER, "XR": dict.inst_type.REGISTER, "OR": dict.inst_type.REGISTER, "AN": dict.inst_type.REGISTER, "SA": dict.inst_type.REGISTER,
-        "LM": dict.inst_type.STACK_INDIRECT, "LD": dict.inst_type.REGISTER, "LI": dict.inst_type.IMMEDIATE, "LS": dict.inst_type.IMMEDIATE, "JP": dict.inst_type.JUMP, "NP": dict.inst_type.INHERENT
+        "SM": dict.InstructionType.STACK_INDIRECT, "SC": dict.InstructionType.REGISTER, "SU": dict.InstructionType.REGISTER, "AD": dict.InstructionType.REGISTER, "XR": dict.InstructionType.REGISTER, "OR": dict.InstructionType.REGISTER, "AN": dict.InstructionType.REGISTER, "SA": dict.InstructionType.REGISTER,
+        "LM": dict.InstructionType.STACK_INDIRECT, "LD": dict.InstructionType.REGISTER, "LI": dict.InstructionType.IMMEDIATE, "LS": dict.InstructionType.IMMEDIATE, "JP": dict.InstructionType.JUMP, "NP": dict.InstructionType.INHERENT
     }
 
     JUMP_CONDITION = {
@@ -88,17 +232,17 @@ def parse_oprand(opcode:str, parts:list[str]) -> int|ValueError:
 
     expected_type = ARG_TYPE[opcode.upper()]
 
-    if expected_type == dict.inst_type.JUMP:
+    if expected_type == dict.InstructionType.JUMP:
         condition = parts[0].upper() if len(parts) > 0 else ""
         if condition not in JUMP_CONDITION:
             return ValueError(f"Invalid jump condition: {condition}")
         return JUMP_CONDITION[condition]
-    elif expected_type == dict.inst_type.STACK_INDIRECT:
+    elif expected_type == dict.InstructionType.STACK_INDIRECT:
         if len(parts) > 1:
             return ValueError("Too many arguments for stack indirect instruction")
         else:
             return 0b0000 # Stack indirect has no operand
-    elif expected_type == dict.inst_type.REGISTER:
+    elif expected_type == dict.InstructionType.REGISTER:
         if len(parts) != 1:
             return ValueError("Expected one argument for register instruction")
         reg = parts[0].upper()
@@ -111,7 +255,7 @@ def parse_oprand(opcode:str, parts:list[str]) -> int|ValueError:
             return reg_num
         except (ValueError, IndexError):
             return ValueError(f"Invalid register value: {parts[0]}")
-    elif expected_type == dict.inst_type.IMMEDIATE:
+    elif expected_type == dict.InstructionType.IMMEDIATE:
         if len(parts) != 1:
             return ValueError("Expected one argument for immediate instruction")
         
@@ -130,7 +274,7 @@ def parse_oprand(opcode:str, parts:list[str]) -> int|ValueError:
                 return imm_val
             except ValueError:
                 return ValueError(f"Invalid immediate value: {parts[0]}")
-    elif expected_type == dict.inst_type.INHERENT:
+    elif expected_type == dict.InstructionType.INHERENT:
         if len(parts) > 0:
             return ValueError("Inherent instruction should not have arguments")
         return 0b0000
@@ -138,9 +282,9 @@ def parse_oprand(opcode:str, parts:list[str]) -> int|ValueError:
 
 if __name__ == "__main__":
     # Example usage
-    line = "AD R1"
+    line = "AD R1 ; A + B -> R1"
     line_number = 1
     architecture = "HC4"
     
-    result = assembleline(line, line_number, architecture)
-    print(result)  # Should print the ListObject with the assembled instruction
+    result = tokenize_lines([line], architecture)
+    print(result)  # Should print the linked list of tokens

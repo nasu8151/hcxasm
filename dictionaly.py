@@ -69,7 +69,7 @@ class AssemblyDictionary:
         return f"Assembly Dictionary for {self.architecture}:\n" + "\n".join(f"{k}: {v:08b}" for k, v in self.instructions.items())
     
 
-class inst_type(Enum):
+class InstructionType(Enum):
     """Enum for instruction types."""
     JUMP = auto()
     STACK_INDIRECT = auto()
