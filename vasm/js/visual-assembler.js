@@ -351,6 +351,134 @@ function makeConditionalGotoBlock(type, label, color) {
   };
 }
 
+// 汎用: ハットブロック版ラベル定義（Scratchのイベントブロック風）
+function makeLabelHatBlock(type, label, color) {
+  Blockly.Blocks[type] = {
+    init: function() {
+      this.appendDummyInput()
+          .appendField(label)
+          .appendField(new Blockly.FieldDropdown(this.getLabelOptions.bind(this)), "LABEL");
+      this.setNextStatement(true, null);
+      this.setColour(color);
+      this.setTooltip("ラベルを定義し、このブロックから始まるプログラムを実行します");
+      
+      // ハットブロックの特徴的な形状にする
+      this.hat = 'cap';
+    },
+    
+    getLabelOptions: function() {
+      // 既存のラベルオプションを取得
+      var options = [];
+      
+      // デフォルトのラベル
+      if (window.customLabels && window.customLabels.length > 0) {
+        for (var i = 0; i < window.customLabels.length; i++) {
+          options.push([window.customLabels[i], window.customLabels[i]]);
+        }
+      } else {
+        options.push(['START', 'START']);
+      }
+      
+      // 「新しいラベルを作成」オプションを追加
+      options.push(['新しいラベルを作成...', 'CREATE_NEW']);
+      console.log('[DEBUG] hat block final options:', options);
+      
+      return options;
+    },
+    
+    onchange: function(event) {
+      console.log('[DEBUG] hat block onchange event triggered:', event);
+      if (event.type === Blockly.Events.BLOCK_CHANGE && 
+          event.blockId === this.id && 
+          event.element === 'field' && 
+          event.name === 'LABEL') {
+        var newValue = event.newValue;
+        console.log('[DEBUG] hat block label changed to:', newValue);
+        if (newValue === 'CREATE_NEW') {
+          this.createNewLabel();
+        }
+      }
+    },
+    
+    createNewLabel: function() {
+      console.log('[DEBUG] createNewLabel called for hat block');
+      
+      // 現在のブロックインスタンスを保存
+      window.currentLabelBlock = this;
+      
+      // ダイアログを表示
+      var dialog = document.getElementById('labelDialog');
+      var input = document.getElementById('labelInput');
+      input.value = 'LABEL' + (Date.now() % 1000);
+      dialog.style.display = 'block';
+      input.focus();
+      input.select();
+    },
+    
+    handleNewLabel: function(newLabel) {
+      if (newLabel && newLabel.trim) {
+        var trimmedLabel = newLabel.trim();
+        console.log('[DEBUG] hat block handling new label:', trimmedLabel);
+        
+        // カスタムラベル一覧に追加
+        if (!window.customLabels) {
+          window.customLabels = [];
+        }
+        
+        if (window.customLabels.indexOf(trimmedLabel) === -1) {
+          window.customLabels.push(trimmedLabel);
+          console.log('[DEBUG] added new label to list:', trimmedLabel);
+          console.log('[DEBUG] current labels:', window.customLabels);
+        }
+        
+        // このブロックの値を更新
+        var field = this.getField('LABEL');
+        if (field) {
+          field.setValue(trimmedLabel);
+          console.log('[DEBUG] hat block field value set to:', trimmedLabel);
+        }
+        
+        // すべてのラベル関連ブロックを更新
+        this.updateAllLabelBlocks();
+        
+        if (field) {
+          console.log('[DEBUG] hat block field value set to:', newLabel);
+        }
+      } else {
+        console.log('[DEBUG] user cancelled or empty input');
+        // キャンセルまたは空の場合、最初のラベルに戻す
+        var field = this.getField('LABEL');
+        if (field && window.customLabels && window.customLabels.length > 0) {
+          field.setValue(window.customLabels[0]);
+          console.log('[DEBUG] reset to first label:', window.customLabels[0]);
+        }
+      }
+    },
+    
+    updateAllLabelBlocks: function() {
+      console.log('[DEBUG] updateAllLabelBlocks called from hat block');
+      // ワークスペース内のすべてのラベル関連ブロックを更新
+      var workspace = this.workspace;
+      var allBlocks = workspace.getAllBlocks();
+      var self = this;
+      console.log('[DEBUG] found', allBlocks.length, 'blocks in workspace');
+      
+      allBlocks.forEach(function(block) {
+        // ラベル定義ブロック、ハットブロック、GOTOブロックを更新
+        if ((block.type === self.type || block.type === 'label_def' || block.type === 'jp' || block.type === 'goto' || block.type === 'goto_if') && block !== self) {
+          console.log('[DEBUG] updating block:', block.id);
+          var field = block.getField('LABEL');
+          if (field) {
+            // メニューを強制的に再生成
+            field.menuGenerator_ = block.getLabelOptions.bind(block);
+            console.log('[DEBUG] updated menuGenerator for block:', block.id);
+          }
+        }
+      });
+    }
+  };
+}
+
 // 汎用: ラベルブロック（ラベルの定義用）
 function makeLabelDefinitionBlock(type, label, color) {
   Blockly.Blocks[type] = {
@@ -512,6 +640,9 @@ function initializeBlocks() {
 
   // ラベル定義ブロックを作成
   makeLabelDefinitionBlock('label_def', 'ラベル', 120);
+  
+  // ハットブロック版ラベル定義を作成
+  makeLabelHatBlock('label_hat', 'プログラム開始', 120);
 }
 
 // --- コード生成ルール（独自アセンブリ出力） ---
@@ -600,12 +731,17 @@ function initializeCodeGenerator() {
     return label + ':\n';
   };
   
+  // ハットブロック用のコード生成ルール
+  Blockly.Assembly.forBlock['label_hat'] = function(block) {
+    var label = block.getFieldValue('LABEL');
+    return label + ':\n';
+  };
+  
   Blockly.Assembly.init = function(workspace) {};
   Blockly.Assembly.finish = function(code) { return code; };
   Blockly.Assembly.scrub_ = function(block, code) {
-    var nextBlock = block.nextConnection && block.nextConnection.targetBlock();
-    var nextCode = nextBlock ? Blockly.Assembly.blockToCode(nextBlock) : '';
-    return code + nextCode;
+    // ハットブロック専用の処理なので、nextBlockは処理しない
+    return code;
   };
 }
 
@@ -614,6 +750,7 @@ function getToolboxConfig() {
   return {
     "kind": "flyoutToolbox",
     "contents": [
+      { "kind": "block", "type": "label_hat" },
       { "kind": "block", "type": "label_def" },
       { "kind": "sep", "gap": "12" },
       { "kind": "block", "type": "sm" },
@@ -672,10 +809,42 @@ function initializeWorkspace() {
     }
   });
 
+  // ハットブロックから開始されるコードを生成する関数
+  function generateCodeFromHatBlocks(workspace) {
+    var code = '';
+    var allBlocks = workspace.getAllBlocks();
+    
+    // ハットブロックのみを探して処理
+    for (var i = 0; i < allBlocks.length; i++) {
+      var block = allBlocks[i];
+      if (block.type === 'label_hat') {
+        // ハットブロックから始まるブロック列をたどって処理
+        var currentBlock = block;
+        while (currentBlock) {
+          try {
+            var blockCode = Blockly.Assembly.forBlock[currentBlock.type];
+            if (blockCode && typeof blockCode === 'function') {
+              var generatedCode = blockCode.call(null, currentBlock);
+              if (generatedCode) {
+                code += generatedCode;
+              }
+            }
+          } catch (error) {
+            console.error('Block code generation error for', currentBlock.type, ':', error);
+          }
+          currentBlock = currentBlock.getNextBlock();
+        }
+      }
+    }
+    
+    return code;
+  }
+
   // 変更があるたびにコード生成して出力
   function updateCode() {
     try {
-      var code = Blockly.Assembly.workspaceToCode(workspace);
+      // ハットブロックに接続されたブロック列のみを処理
+      var code = generateCodeFromHatBlocks(workspace);
       var outputDiv = document.getElementById('output');
       if (outputDiv) {
         if (code.trim() === '') {
