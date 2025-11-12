@@ -652,7 +652,24 @@ function initializeWorkspace() {
   
   // Blockly初期化
   var workspace = Blockly.inject('blocklyDiv', {
-    toolbox: toolbox
+    toolbox: toolbox,
+    move: {
+      scrollbars: {
+        horizontal: true,
+        vertical: true
+      },
+      drag: true,
+      wheel: true
+    },
+    zoom: {
+      controls: true,
+      wheel: true,
+      startScale: 1.0,
+      maxScale: 3,
+      minScale: 0.3,
+      scaleSpeed: 1.2,
+      pinch: true
+    }
   });
 
   // 変更があるたびにコード生成して出力
