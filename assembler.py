@@ -1,6 +1,6 @@
 import dictionaly as dict
 import re
-from typing import Optional
+from typing import Optional, Sequence
 from enum import Enum, auto
 
 class TokenType(Enum):
@@ -11,6 +11,7 @@ class TokenType(Enum):
     DIRECTIVE = auto()
     OPERAND = auto()
     COMMENT = auto()
+    EOF = auto()
 
 class TokenObject:
     """Represents a token object with a type and value."""
@@ -27,6 +28,7 @@ class LinkedList:
     def __init__(self):
         self.head: Optional[TokenObject] = None
         self.tail: Optional[TokenObject] = None
+        self.current: Optional[TokenObject] = None
 
     def append(self, toktype:TokenType, value:str, linenum:int):
         """Append a new token to the linked list."""
@@ -49,9 +51,13 @@ class LinkedList:
             return value
         return None
     
-    def peek_head(self) -> Optional[TokenObject]:
-        """Return the head token without consuming it."""
-        return self.head
+    def peek(self) -> Optional[TokenObject]:
+        """Return the current token without consuming it."""
+        return self.current
+    
+    def reset(self):
+        """Reset the current pointer to the head of the list."""
+        self.current = self.head
     
     def getline(self, linenum:int) -> list[str]:
         """Return the value of the token at the given line number."""
@@ -63,50 +69,6 @@ class LinkedList:
             current = current.next
         return result
     
-    def parse_label(self, labelobj:dict.LabelObject):
-        current = self.head
-        while current is not None:
-            if current.toktype == TokenType.OPERAND:
-                val = re.split(r'[#: ]*', current.value)
-                if len(val) == 2:
-                    label_name = val[0]
-                    slice_notation = int(val[1])  # e.g., ':0' or ':2'
-                    if label_name == labelobj.name:
-                        current.value = str(
-                            labelobj.address >> (slice_notation * 4) & 0x0F)
-            current = current.next
-
-
-
-
-    def assembletokens(self, architecture:str) -> list[dict.ListObject]:
-        """Assemble the tokens into a list of ListObjects."""
-        assembled_lines:list[dict.ListObject] = []
-        current = self.head
-        address_counter = 0
-        while current is not None:
-            line_number = current.linenum
-            if current.toktype == TokenType.COMMENT:
-                # Skip comments
-                current = current.next
-                continue
-            elif current.toktype == TokenType.LABEL:
-                label_name = current.value[:-1]  # Remove the colon
-                label_obj = dict.LabelObject(name=label_name, line=line_number, address=address_counter)
-                self.parse_label(label_obj) # Resolve label references in operands
-                assembled_lines.append(dict.ListObject(
-                    label=label_obj,
-                    address=address_counter,
-                    machinecode=None,
-                    linenum=line_number,
-                    source=self.getline(line_number),
-                    error=None
-                ))
-                current = current.next
-            elif current.toktype == TokenType.INSTRUCTION:
-                instruction = current.value
-                opcode = dict.AssemblyDictionary(architecture).get_instruction(instruction.upper())
-                
 
 
     def __repr__(self):
@@ -123,27 +85,51 @@ class LinkedList:
             yield current
             current = current.next
 
-def tokenize_lines(lines:list[str], architecture:str) -> LinkedList:
-    head = LinkedList()
-    for i in range(len(lines)):
+def tokenize_lines(lines:str) -> LinkedList:
+    tokens = LinkedList()
+    lines_list = lines.split('\n')
+    line_num = 0
+    for i in range(len(lines_list)):
         line_num = i + 1
-        elements = lines[i].strip().split()
-        for j in range(len(elements)):
+        elements = lines_list[i].strip().split()
+        if not elements:
+            continue  # Skip empty lines
+        if re.match(dict.LABEL_PATTERN, elements[0]):
+            tokens.append(TokenType.LABEL, elements[0], line_num)
+        elif re.match(dict.COMMENT_PATTERN, elements[0]):
+            tokens.append(TokenType.COMMENT, " ".join(elements), line_num)
+            continue  # Entire line is comment
+        elif elements[0].upper() == '.MACRO':
+            tokens.append(TokenType.MACRO, elements[0], line_num)
+        elif elements[0].startswith('.'):
+            tokens.append(TokenType.DIRECTIVE, elements[0], line_num)
+        else:
+            tokens.append(TokenType.INSTRUCTION, elements[0], line_num)
+        for j in range(1, len(elements)):
             elem = elements[j]
             if re.match(dict.LABEL_PATTERN, elem):
-                head.append(TokenType.LABEL, elem, line_num)
-            elif elem.upper() in dict.AssemblyDictionary(architecture).instructions:
-                head.append(TokenType.INSTRUCTION, elem, line_num)
+                tokens.append(TokenType.LABEL, elem, line_num)
             elif elem.startswith(';') or elem.startswith('//'):
-                head.append(TokenType.COMMENT, " ".join(elements[j:]), line_num)
+                tokens.append(TokenType.COMMENT, " ".join(elements[j:]), line_num)
                 break  # Rest of the line is comment
-            elif elem.upper() == '.MACRO':
-                head.append(TokenType.MACRO, elem, line_num)
-            elif elem.startswith('.'):
-                head.append(TokenType.DIRECTIVE, elem, line_num)
             else:
-                head.append(TokenType.OPERAND, elem, line_num)
-    return head
+                tokens.append(TokenType.OPERAND, elem, line_num)
+    tokens.append(TokenType.EOF, "", line_num + 1)
+    return tokens
+
+def parse_label(tokens:LinkedList, labelobj:dict.LabelObject):
+    current = tokens.head
+    while current is not None:
+        if current.toktype == TokenType.OPERAND:
+            val = re.split(r'[#: ]*', current.value)
+            if len(val) == 2:
+                label_name = val[0]
+                slice_notation = int(val[1])  # e.g., ':0' or ':2'
+                if label_name == labelobj.name:
+                    current.value = str(
+                        labelobj.address >> (slice_notation * 4) & 0x0F)
+        current = current.next
+
 
 def assembleline(line:str, line_number:int, architecture:str = "HC4") -> dict.ListObject:
     # Remove comments first
@@ -282,9 +268,7 @@ def parse_oprand(opcode:str, parts:list[str]) -> int|ValueError:
 
 if __name__ == "__main__":
     # Example usage
-    line = "AD R1 ; A + B -> R1"
-    line_number = 1
-    architecture = "HC4"
+    lines = "LI #1\nLI #2\nAD R1\nJP NZ ; Inline-comment\nLABEL1:\n SM\n; Full line comment\n.MACRO MYMACRO PRM1 PRM2\n.ENDM"
     
-    result = tokenize_lines([line], architecture)
+    result = tokenize_lines(lines)
     print(result)  # Should print the linked list of tokens
