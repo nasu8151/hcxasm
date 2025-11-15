@@ -260,11 +260,11 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode) => {
 
   try {
     // 一時的なアセンブリファイルを作成
-    const tempAsmPath = path.join(__dirname, '..', 'temp_assembly.asm');
+    const tempAsmPath = path.join(__dirname, '.', 'temp_assembly.asm');
     fs.writeFileSync(tempAsmPath, assemblyCode, 'utf8');
 
     // hcxasm.pyのパスを取得
-    const hcxasmPath = path.join(__dirname, '..', 'hcxasm.py');
+    const hcxasmPath = path.join(__dirname, '.', 'hcxasm.py');
     
     // hcxasm.pyが存在するかチェック
     if (!fs.existsSync(hcxasmPath)) {
