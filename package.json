@@ -1,15 +1,51 @@
 {
   "name": "hcx-visual-assembler",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "HCx Series Visual Assembler using Blockly",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --enable-logging"
+    "dev": "electron . --enable-logging",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:dir": "electron-builder --dir",
+    "build:simple": "powershell -File build-simple.ps1",
+    "dist": "npm run build:simple"
   },
   "author": "nasu8151",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^latest"
+    "electron": "^39.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "jp.shibaura.hcx.visual-assembler",
+    "productName": "HCx Visual Assembler",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "index.html",
+      "js/**/*",
+      "css/**/*",
+      "assets/**/*",
+      "hcxasm.py",
+      "assembler.py",
+      "dictionaly.py"
+    ],
+    "win": {
+      "target": "portable",
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }
