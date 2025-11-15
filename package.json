@@ -37,8 +37,15 @@
       "dictionaly.py"
     ],
     "win": {
-      "target": "portable",
-      "artifactName": "${productName}-${version}-portable.${ext}"
+      "target": [
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-win32-x64.${ext}",
+      "verifyUpdateCodeSignature": false,
+      "signAndEditExecutable": false
     },
     "portable": {
       "artifactName": "${productName}-${version}-portable.${ext}"
