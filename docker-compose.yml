@@ -1,0 +1,21 @@
+services:
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /project
+    environment:
+      - ELECTRON_CACHE=/root/.cache/electron
+      - ELECTRON_BUILDER_CACHE=/root/.cache/electron-builder
+      - CSC_IDENTITY_AUTO_DISCOVERY=false
+    volumes:
+      - ./:/project
+      - electron_cache:/root/.cache/electron
+      - electron_builder_cache:/root/.cache/electron-builder
+    # Run npm install (tolerant to missing lockfile) and build for Windows
+    # Ensure dist directory exists (avoid ENOTDIR when previously a file)
+    command: bash -lc "[ -f dist ] && rm dist; mkdir -p dist; npm install && npm run build:win"
+
+volumes:
+  electron_cache:
+  electron_builder_cache:

@@ -8,9 +8,8 @@
     "dev": "electron . --enable-logging",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
-    "build:dir": "electron-builder --dir",
-    "build:simple": "powershell -File build-simple.ps1",
-    "dist": "npm run build:simple"
+    "build:win:docker": "docker compose run --rm builder",
+    "docker:sh": "docker compose run --rm builder bash"
   },
   "author": "nasu8151",
   "license": "MIT",
@@ -20,7 +19,7 @@
   },
   "build": {
     "appId": "jp.shibaura.hcx.visual-assembler",
-    "productName": "HCx Visual Assembler",
+    "productName": "HCx_Visual-Assembler",
     "directories": {
       "output": "dist"
     },

@@ -1,0 +1,27 @@
+# Node
+node_modules
+npm-debug.log*
+yarn-error.log*
+
+# Build outputs
+/dist
+/target
+/hcxasm.build
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode
+.idea
