@@ -34,7 +34,13 @@ async function saveAssemblyFile() {
     return;
   }
   
-  const code = Blockly.Assembly.workspaceToCode(window.vasmWorkspace);
+  // 表示中タブと完全一致させるため getAssemblyCode を優先
+  let code = '';
+  if (typeof window.getAssemblyCode === 'function') {
+    code = window.getAssemblyCode();
+  } else {
+    code = Blockly.Assembly.workspaceToCode(window.vasmWorkspace);
+  }
   
   if (!code || code.trim() === '') {
     alert('保存するアセンブリコードがありません。ブロックを配置してください。');
@@ -79,7 +85,13 @@ async function exportAssembledBinary() {
     return;
   }
   
-  const code = Blockly.Assembly.workspaceToCode(window.vasmWorkspace);
+  // 表示中タブと完全一致させるため getAssemblyCode を優先
+  let code = '';
+  if (typeof window.getAssemblyCode === 'function') {
+    code = window.getAssemblyCode();
+  } else {
+    code = Blockly.Assembly.workspaceToCode(window.vasmWorkspace);
+  }
   
   if (!code || code.trim() === '') {
     alert('エクスポートするアセンブリコードがありません。ブロックを配置してください。');

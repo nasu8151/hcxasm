@@ -260,18 +260,16 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode) => {
 
   try {
     // 一時的なアセンブリファイルを作成
-    const tempAsmPath = path.join(__dirname, 'temp_assembly.asm');
+    let tempAsmPath;
+    if (app.isPackaged) {
+      tempAsmPath = path.join(__dirname, '../temp_assembly.asm');
+    } else {
+      tempAsmPath = path.join(__dirname, 'temp_assembly.asm');
+    }
     fs.writeFileSync(tempAsmPath, assemblyCode, 'utf8');
 
-    // hcxasm.pyのパスを取得（開発時とビルド時で異なる）
-    let hcxasmPath;
-    if (app.isPackaged) {
-      // ビルド済みアプリの場合、resources/app内から取得
-      hcxasmPath = path.join(__dirname, 'hcxasm.py');
-    } else {
-      // 開発時は同じディレクトリから取得
-      hcxasmPath = path.join(__dirname, 'hcxasm.py');
-    }
+    // hcxasm.pyのパスを取得
+    const hcxasmPath = path.join(__dirname, 'hcxasm.py');
     
     // hcxasm.pyが存在するかチェック
     if (!fs.existsSync(hcxasmPath)) {

@@ -740,7 +740,10 @@ function initializeCodeGenerator() {
   Blockly.Assembly.init = function(workspace) {};
   Blockly.Assembly.finish = function(code) { return code; };
   Blockly.Assembly.scrub_ = function(block, code) {
-    // ハットブロック専用の処理なので、nextBlockは処理しない
+    var nextBlock = block.getNextBlock();
+    if (nextBlock) {
+      return code + Blockly.Assembly.blockToCode(nextBlock);
+    }
     return code;
   };
 }
@@ -848,7 +851,7 @@ function initializeWorkspace() {
       var outputDiv = document.getElementById('output');
       if (outputDiv) {
         if (code.trim() === '') {
-          outputDiv.textContent = '生成されたアセンブリコードがここに表示されます...';
+          outputDiv.textContent = 'Place the hat blocks to start assembling...';
         } else {
           outputDiv.textContent = code;
         }
@@ -856,13 +859,23 @@ function initializeWorkspace() {
         outputDiv.scrollTop = outputDiv.scrollHeight;
       }
     } catch (error) {
-      console.error('[ERROR] コード生成中にエラーが発生:', error);
+      console.error('[ERROR] Code generation error:', error);
       var outputDiv = document.getElementById('output');
       if (outputDiv) {
-        outputDiv.textContent = 'コード生成エラー: ' + error.message;
+        outputDiv.textContent = '[ERROR] Code generation error: ' + error.message;
       }
     }
   }
+
+  // 外部（保存処理等）から同一ロジックでコード取得できるよう公開
+  window.getAssemblyCode = function() {
+    try {
+      return generateCodeFromHatBlocks(workspace);
+    } catch (e) {
+      console.error('[ERROR] failed to get assembly code:', e);
+      return '';
+    }
+  };
   
   workspace.addChangeListener(updateCode);
   
