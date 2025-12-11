@@ -614,23 +614,39 @@ function makeLabelDefinitionBlock(type, label, color) {
 
 // --- ブロック初期化関数 ---
 function initializeBlocks() {
+  // アーキテクチャモード（HC4 / HC4E）
+  if (!window.architecture || (window.architecture !== 'HC4' && window.architecture !== 'HC4E')) {
+    window.architecture = 'HC4';
+  }
+
   // カスタムラベルを初期化
   window.customLabels = ['START', 'LOOP', 'END'];
 
-  // 命令ごとにブロックを定義
-  makeNoArgBlock('sm', 'SM', 60);
-  makeRegisterBlock('sc', 'SC', 65);
-  makeRegisterBlock('su', 'SU', 70);
-  makeRegisterBlock('ad', 'AD', 75);
-  makeRegisterBlock('xr', 'XR', 80);
-  makeRegisterBlock('or', 'OR', 85);
-  makeRegisterBlock('an', 'AN', 90);
-  makeRegisterBlock('sa', 'SA', 95);
-  makeNoArgBlock('lm', 'LM', 100);
-  makeRegisterBlock('ld', 'LD', 105);
-  makeImmBlock('li', 'LI', 110);
-  makeFlagBlock('jp', 'JP', 120);
-  makeNoArgBlock('np', 'NP', 125);
+  // 命令ごとにブロックを定義（モードでフィルタ）
+  if (window.architecture === 'HC4') {
+    makeNoArgBlock('sm', 'SM', 60);
+    makeRegisterBlock('sc', 'SC', 65);
+    makeRegisterBlock('su', 'SU', 70);
+    makeRegisterBlock('ad', 'AD', 75);
+    makeRegisterBlock('xr', 'XR', 80);
+    makeRegisterBlock('or', 'OR', 85);
+    makeRegisterBlock('an', 'AN', 90);
+    makeRegisterBlock('sa', 'SA', 95);
+    makeNoArgBlock('lm', 'LM', 100);
+    makeRegisterBlock('ld', 'LD', 105);
+    makeImmBlock('li', 'LI', 110);
+    makeFlagBlock('jp', 'JP', 120);
+    makeNoArgBlock('np', 'NP', 125);
+  } else {
+    // HC4E: AD, XR, SA, LD, LI, JP, NP のみ
+    makeRegisterBlock('ad', 'AD', 75);
+    makeRegisterBlock('xr', 'XR', 80);
+    makeRegisterBlock('sa', 'SA', 95);
+    makeRegisterBlock('ld', 'LD', 105);
+    makeImmBlock('li', 'LI', 110);
+    makeFlagBlock('jp', 'JP', 120);
+    makeNoArgBlock('np', 'NP', 125);
+  }
 
   // GOTO疑似命令
   makeGotoBlock('goto', 'GOTO', 130);
@@ -709,20 +725,32 @@ function initializeCodeGenerator() {
   // GOTO用コード生成ルール
   Blockly.Assembly.forBlock['goto'] = function(block) {
     var label = block.getFieldValue('LABEL');
-    return  'LI #' + label + ':2\n' +
-            'LI #' + label + ':1\n' +
-            'LI #' + label + ':0\n' +
-            'JP\n';
+    if (window.architecture === 'HC4E') {
+      return  'LI #' + label + ':1\n' +
+              'LI #' + label + ':0\n' +
+              'JP\n';
+    } else {
+      return  'LI #' + label + ':2\n' +
+              'LI #' + label + ':1\n' +
+              'LI #' + label + ':0\n' +
+              'JP\n';
+    }
   };
   
   // 条件付きGOTO用コード生成ルール
   Blockly.Assembly.forBlock['goto_if'] = function(block) {
     var label = block.getFieldValue('LABEL');
     var flag = block.getFieldValue('FLAG');
-    return  'LI #' + label + ':2\n' +
-            'LI #' + label + ':1\n' +
-            'LI #' + label + ':0\n' +
-            'JP ' + flag + '\n';
+    if (window.architecture === 'HC4E') {
+      return  'LI #' + label + ':1\n' +
+              'LI #' + label + ':0\n' +
+              'JP ' + flag + '\n';
+    } else {
+      return  'LI #' + label + ':2\n' +
+              'LI #' + label + ':1\n' +
+              'LI #' + label + ':0\n' +
+              'JP ' + flag + '\n';
+    }
   };
   
   // ラベル定義ブロック用のコード生成ルール
@@ -750,12 +778,25 @@ function initializeCodeGenerator() {
 
 // --- ツールボックス定義 ---
 function getToolboxConfig() {
-  return {
-    "kind": "flyoutToolbox",
-    "contents": [
-      { "kind": "block", "type": "label_hat" },
-      { "kind": "block", "type": "label_def" },
-      { "kind": "sep", "gap": "12" },
+  const common = [
+    { "kind": "block", "type": "label_hat" },
+    { "kind": "block", "type": "label_def" },
+    { "kind": "sep", "gap": "12" }
+  ];
+
+  let commands;
+  if (window.architecture === 'HC4E') {
+    commands = [
+      { "kind": "block", "type": "ad" },
+      { "kind": "block", "type": "xr" },
+      { "kind": "block", "type": "sa" },
+      { "kind": "block", "type": "ld" },
+      { "kind": "block", "type": "li" },
+      { "kind": "block", "type": "jp" },
+      { "kind": "block", "type": "np" }
+    ];
+  } else {
+    commands = [
       { "kind": "block", "type": "sm" },
       { "kind": "block", "type": "sc" },
       { "kind": "block", "type": "su" },
@@ -768,10 +809,18 @@ function getToolboxConfig() {
       { "kind": "block", "type": "ld" },
       { "kind": "block", "type": "li" },
       { "kind": "block", "type": "jp" },
-      { "kind": "block", "type": "np" },
-      { "kind": "block", "type": "goto" },
-      { "kind": "block", "type": "goto_if" }
-    ]
+      { "kind": "block", "type": "np" }
+    ];
+  }
+
+  const extra = [
+    { "kind": "block", "type": "goto" },
+    { "kind": "block", "type": "goto_if" }
+  ];
+
+  return {
+    "kind": "flyoutToolbox",
+    "contents": [...common, ...commands, ...extra]
   };
 }
 

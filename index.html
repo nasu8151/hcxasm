@@ -13,7 +13,12 @@
     <link rel="stylesheet" href="css/style.css">
   </head>
   <body>
-    <div style="margin-bottom: 10px; margin-top: 10px;">
+    <div style="margin-bottom: 10px; margin-top: 10px; display:flex; gap:12px; align-items:center;">
+      <label>Architecture:</label>
+      <select id="archSelect">
+        <option value="HC4">HC4</option>
+        <option value="HC4E">HC4E</option>
+      </select>
       <button id="saveButton" onclick="saveAssemblyFile()">アセンブリファイルを保存</button>
     </div>
     <!-- Blocklyエディタを置く場所 -->
@@ -64,6 +69,21 @@
         if (activeButton) activeButton.classList.add('active');
         if (activePane) activePane.classList.add('active');
       }
+
+      // アーキテクチャ切替
+      document.addEventListener('DOMContentLoaded', function() {
+        const sel = document.getElementById('archSelect');
+        if (sel) {
+          sel.value = (window.architecture || 'HC4');
+          sel.addEventListener('change', function() {
+            window.architecture = sel.value;
+            // 再初期化でツールボックスとジェネレータを更新
+            if (typeof initializeApp === 'function') {
+              initializeApp();
+            }
+          });
+        }
+      });
     </script>
 
     <!-- ビジュアルアセンブラ本体コード -->

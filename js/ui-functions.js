@@ -105,7 +105,8 @@ async function exportAssembledBinary() {
       addOutputMessage('アセンブル処理を開始します...');
       console.log('[INFO] アセンブル中...');
       
-      const result = await window.electronAPI.exportAssembledBinary(code);
+      const arch = (window.architecture === 'HC4E') ? 'HC4E' : 'HC4';
+      const result = await window.electronAPI.exportAssembledBinary(code, arch);
       
       if (result.success) {
         addOutputMessage(`バイナリファイルが生成されました: ${result.filePath}`);

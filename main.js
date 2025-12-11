@@ -242,7 +242,7 @@ ipcMain.handle('show-label-dialog', async (event, defaultValue) => {
 });
 
 // バイナリエクスポート用IPCハンドラ
-ipcMain.handle('export-assembled-binary', async (event, assemblyCode) => {
+ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architecture) => {
   // バイナリファイルの保存先を選択
   const result = await dialog.showSaveDialog({
     title: 'アセンブルされたバイナリファイルを保存',
@@ -297,6 +297,9 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode) => {
       // ファイル拡張子に基づいて出力形式を決定
       const fileExt = path.extname(result.filePath).toLowerCase();
       const args = [hcxasmPath, tempAsmPath, '-o', result.filePath];
+      // アーキテクチャ指定（デフォルトHC4）
+      const archArg = (architecture === 'HC4E') ? 'HC4E' : 'HC4';
+      args.push('-a', archArg);
       
       // 拡張子に応じて形式オプションを追加
       if (fileExt === '.hex') {
