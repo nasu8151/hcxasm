@@ -1,6 +1,6 @@
 {
   "name": "hcx-visual-assembler",
-  "version": "2.0.0-alpha2",
+  "version": "2.0.0-alpha3",
   "description": "HCx Series Visual Assembler using Blockly",
   "main": "main.js",
   "scripts": {
@@ -23,6 +23,7 @@
     "directories": {
       "output": "dist"
     },
+    "asar": false,
     "files": [
       "main.js",
       "preload.js",

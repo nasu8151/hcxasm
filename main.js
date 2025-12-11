@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 // メニューテンプレートを作成
 function createMenu(mainWindow) {
@@ -259,17 +259,28 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode) => {
   }
 
   try {
-    // 一時的なアセンブリファイルを作成
-    let tempAsmPath;
-    if (app.isPackaged) {
-      tempAsmPath = path.join(__dirname, '../temp_assembly.asm');
-    } else {
-      tempAsmPath = path.join(__dirname, 'temp_assembly.asm');
+    // Python実行ファイル選択（インストール前提）
+    function choosePython() {
+      const candidates = process.platform === 'win32' ? ['py', 'python', 'python3'] : ['python3', 'python', 'py'];
+      for (const cmd of candidates) {
+        const r = spawnSync(cmd, ['--version'], { windowsHide: true });
+        if (!r.error && r.status === 0) return cmd;
+      }
+      return null;
     }
+    const pythonCmd = choosePython();
+    if (!pythonCmd) {
+      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+    }
+
+    // 一時的なアセンブリファイルを作成（OSのtemp領域）
+    const tempAsmPath = path.join(app.getPath('temp'), `temp_assembly_${Date.now()}.asm`);
     fs.writeFileSync(tempAsmPath, assemblyCode, 'utf8');
 
-    // hcxasm.pyのパスを取得
-    const hcxasmPath = path.join(__dirname, 'hcxasm.py');
+    // hcxasm.pyのパス（パッケージ時は resources/app 直下、開発時はソース直下）
+    const hcxasmPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app', 'hcxasm.py')
+      : path.join(__dirname, 'hcxasm.py');
     
     // hcxasm.pyが存在するかチェック
     if (!fs.existsSync(hcxasmPath)) {
@@ -295,8 +306,9 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode) => {
       }
       // .binの場合はデフォルトのbinary形式なので何も追加しない
       
-      const pythonProcess = spawn('py', args, {
-        cwd: path.dirname(hcxasmPath)
+      const pythonProcess = spawn(pythonCmd, args, {
+        cwd: path.dirname(hcxasmPath),
+        windowsHide: true
       });
 
       let stdout = '';
