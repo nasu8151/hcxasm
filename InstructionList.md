@@ -55,12 +55,12 @@ These instrucitons may not work correctly.
 
 | Name            | Opc  | Opr  | Flag changes |                            |
 | --------------- | ---- | ---- | ------------ | -------------------------- |
-| \*```SC [AB]``` | 0000 | 0000 | Z            | Store C in [AB]            |
+| \*```SM```      | 0000 | 0000 | Z            | Store C in [AB]            |
 | ```SC r```      | 0001 | r    | Z            | Store C in r               |
 | ```SA r```      | 0111 | r    | Z            | Store A in r               |
-| \*```LD [AB]``` | 1000 | 0000 |              | LoaD from [AB]             |
+| \*```LM```      | 1000 | 0000 |              | LoaD from [AB]             |
 | ```LD r```      | 1001 | r    |              | LoaD form r                |
-| ```li #i```     | 1010 | i    |              | LoaD immediate             |
+| ```LI #i```     | 1010 | i    |              | LoaD immediate             |
 | \*\*```LS #i``` | 1100 | i    |              | Load immediate and Shift A |
 
 Note:    
@@ -69,14 +69,14 @@ Note:
 
 ## System control instructions
 
-| Name                | Opc  | Opr  |                               |
-| ------------------- | ---- | ---- | ----------------------------- |
-| \*```JP [ABC]```    | 1110 | 0000 | JumP [ABC]                    |
-| \*```JP C [ABC]```  | 1110 | 0010 | Jump if Carry flag is set     |
-| \*```JP NC [ABC]``` | 1110 | 0011 | Jump if Carry flag is Not set |
-| \*```JP Z [ABC]```  | 1110 | 0100 | Jump if Zero flag is set      |
-| \*```JP NZ [ABC]``` | 1110 | 0101 | Jump if Zero flag is Not set  |
-| ```NP```            | 1110 | 0001 | No oPlation                   |
+| Name          | Opc  | Opr  |                               |
+| ------------- | ---- | ---- | ----------------------------- |
+| \*```JP```    | 1110 | 0000 | JumP [ABC]                    |
+| \*```JP C```  | 1110 | 0010 | Jump if Carry flag is set     |
+| \*```JP NC``` | 1110 | 0011 | Jump if Carry flag is Not set |
+| \*```JP Z```  | 1110 | 0100 | Jump if Zero flag is set      |
+| \*```JP NZ``` | 1110 | 0101 | Jump if Zero flag is Not set  |
+| ```NP```      | 1110 | 0001 | No oPlation                   |
 
 Note:    
 \* Can be omitted addressing.
@@ -104,10 +104,12 @@ For the ```LS #``` and ```li #``` instructions, binary(```0b1010```) and hexadec
 
 ```NP``` does nothing. This is equivalent to ```NOP```.   
 ```JP``` instructions change conditionally PC.
+```JP``` has only one oprand, it specifies condition.
 
-## Pseudo instructions
+## Pseudo instructions and directives
 
-```.equ``` defines a label with the value specified by the operand, similar to ```#define``` in C.
+```.equ``` and ```.def``` defines a label with the value specified by the operand, similar to ```#define``` in C.\
+```.equ|.def NAME [VALUE]```
 
 ## HC4<sub>E</sub>
 
