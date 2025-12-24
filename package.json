@@ -33,6 +33,7 @@
       "css/**/*",
       "assets/**/*",
       "hcxasm.py",
+      "load4e.py",
       "assembler.py",
       "dictionaly.py"
     ],

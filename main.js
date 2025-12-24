@@ -3,6 +3,103 @@ const path = require('path');
 const fs = require('fs');
 const { spawn, spawnSync } = require('child_process');
 
+// COMポート管理（スキャン結果と選択状態）
+let availablePorts = [];
+let selectedComPort = null;
+
+// --- Python仮想環境の用意 ---
+function getVenvPaths() {
+  const venvRoot = path.join(app.getPath('userData'), 'python-venv');
+  const pythonExe = process.platform === 'win32'
+    ? path.join(venvRoot, 'Scripts', 'python.exe')
+    : path.join(venvRoot, 'bin', 'python');
+  const pipExe = process.platform === 'win32'
+    ? path.join(venvRoot, 'Scripts', 'pip.exe')
+    : path.join(venvRoot, 'bin', 'pip');
+  return { venvRoot, pythonExe, pipExe };
+}
+
+function chooseSystemPython() {
+  const candidates = process.platform === 'win32' ? ['py', 'python', 'python3'] : ['python3', 'python', 'py'];
+  for (const cmd of candidates) {
+    const r = spawnSync(cmd, ['--version'], { windowsHide: true });
+    if (!r.error && r.status === 0) return cmd;
+  }
+  return null;
+}
+
+async function ensurePythonEnv() {
+  try {
+    const { venvRoot, pythonExe, pipExe } = getVenvPaths();
+    // 既存チェック
+    if (!fs.existsSync(pythonExe)) {
+      const sysPy = chooseSystemPython();
+      if (!sysPy) {
+        console.error('[ERROR] Python 3.x が見つかりません');
+        return; // 起動は継続、エクスポート時に詳細エラーを返す
+      }
+      // venv作成
+      const mk = spawnSync(sysPy, ['-m', 'venv', venvRoot], { windowsHide: true });
+      if (mk.status !== 0) {
+        console.error('[ERROR] venv作成に失敗:', mk.stderr?.toString() || '');
+        return;
+      }
+    }
+    // pip確認・アップグレード
+    if (fs.existsSync(pythonExe)) {
+      spawnSync(pythonExe, ['-m', 'pip', '--version'], { windowsHide: true });
+      spawnSync(pythonExe, ['-m', 'pip', 'install', '--upgrade', 'pip'], { windowsHide: true });
+      // 必要パッケージのインストール
+      const requiredPackages = ['pyserial'];
+      for (const pkg of requiredPackages) {
+        spawnSync(pythonExe, ['-m', 'pip', 'install', pkg], { windowsHide: true });
+      }
+
+    }
+  } catch (e) {
+    console.error('[ERROR] ensurePythonEnv中に例外:', e);
+  }
+}
+
+// COMポートをpyserialで列挙
+function scanComPorts() {
+  try {
+    const { pythonExe } = getVenvPaths();
+    let pythonCmd = null;
+    if (fs.existsSync(pythonExe)) {
+      pythonCmd = pythonExe;
+    } else {
+      pythonCmd = chooseSystemPython();
+    }
+    if (!pythonCmd) {
+      return { success: false, error: 'Pythonが見つかりません（pyserialで列挙不可）' };
+    }
+    const script = [
+      'import json',
+      'import serial.tools.list_ports as lp',
+      'res=[{"device":p.device,"description":getattr(p,"description",None),"hwid":getattr(p,"hwid",None)} for p in lp.comports()]',
+      'print(json.dumps(res))'
+    ].join('\n');
+    const r = spawnSync(pythonCmd, ['-c', script], { windowsHide: true });
+    if (r.status === 0) {
+      try {
+        const list = JSON.parse((r.stdout||'').toString());
+        availablePorts = Array.isArray(list) ? list : [];
+        // 既存の選択が無ければ最初を選択
+        if (!selectedComPort && availablePorts.length) {
+          selectedComPort = availablePorts[0];
+        }
+        return { success: true, ports: availablePorts };
+      } catch (e) {
+        return { success: false, error: 'ポート一覧の解析に失敗: ' + e.message };
+      }
+    }
+    return { success: false, error: (r.stderr||'').toString() || 'pyserial列挙が失敗しました' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 // メニューテンプレートを作成
 function createMenu(mainWindow) {
   const template = [
@@ -74,6 +171,34 @@ function createMenu(mainWindow) {
       label: 'Sketch',
       submenu: [
         {
+          label: 'Scan COM Ports',
+          click: () => {
+            const res = scanComPorts();
+            if (!res.success) {
+              dialog.showErrorBox('COMポート検索エラー', res.error);
+            }
+            // レンダラーへ通知
+            mainWindow.webContents.send('com-ports', availablePorts);
+            // メニューを最新のポートで更新
+            Menu.setApplicationMenu(createMenu(mainWindow));
+          }
+        },
+        {
+          label: 'Select COM Port',
+          submenu: (availablePorts.length
+            ? availablePorts.map(p => ({
+                label: `${p.device}${p.description ? ' ('+p.description+')' : ''}`,
+                type: 'radio',
+                checked: !!(selectedComPort && selectedComPort.device === p.device),
+                click: () => {
+                  selectedComPort = p;
+                  mainWindow.webContents.send('com-port-selected', p);
+                }
+              }))
+            : [{ label: 'No ports', enabled: false }]
+          )
+        },
+        {
           label: 'Export as assembly',
           accelerator: 'CmdOrCtrl+E',
           click: () => {
@@ -87,6 +212,15 @@ function createMenu(mainWindow) {
           click: () => {
             // アセンブルしてバイナリをエクスポート
             mainWindow.webContents.send('menu-action', 'export-binary');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Upload to HC4E',
+          accelerator: 'CmdOrCtrl+U',
+          click: () => {
+            // 現在のワークスペースをアップロード
+            mainWindow.webContents.send('menu-action', 'upload');
           }
         }
       ]
@@ -148,13 +282,78 @@ function createWindow() {
 }
 
 // アプリが準備完了したときに実行
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  // 起動時に仮想環境を確認・作成
+  await ensurePythonEnv();
+  createWindow();
+});
 
 // 全てのウィンドウが閉じられたとき
 app.on('window-all-closed', () => {
   // macOS以外では、全ウィンドウが閉じられたらアプリを終了
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+// デバイスへアップロード
+ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => {
+  try {
+    if (!selectedComPort || !selectedComPort.device) {
+      return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select から選択してください。' };
+    }
+
+    // venv優先でPython
+    const { pythonExe } = getVenvPaths();
+    let pythonCmd = null;
+    if (fs.existsSync(pythonExe)) pythonCmd = pythonExe; else pythonCmd = chooseSystemPython();
+    if (!pythonCmd) return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+
+    const tmpDir = app.getPath('temp');
+    const asmPath = path.join(tmpDir, `va_${Date.now()}.asm`);
+    const hexPath = path.join(tmpDir, `va_${Date.now()}.hex`);
+    fs.writeFileSync(asmPath, assemblyCode, 'utf8');
+
+    // 1) アセンブル（ihex）
+    const hcxasmPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app', 'hcxasm.py')
+      : path.join(__dirname, 'hcxasm.py');
+    if (!fs.existsSync(hcxasmPath)) {
+      try { fs.unlinkSync(asmPath); } catch (_) {}
+      return { success: false, error: 'hcxasm.py が見つかりません。' };
+    }
+    const archArg = (architecture === 'HC4E') ? 'HC4E' : 'HC4';
+    const assembleArgs = [hcxasmPath, asmPath, '-o', hexPath, '-f', 'ihex', '-a', archArg];
+    const asmProc = spawnSync(pythonCmd, assembleArgs, { cwd: path.dirname(hcxasmPath), windowsHide: true, encoding: 'utf8' });
+    if (asmProc.status !== 0) {
+      try { fs.unlinkSync(asmPath); } catch (_) {}
+      return { success: false, error: `アセンブル失敗:\n${asmProc.stderr || asmProc.stdout || 'unknown error'}` };
+    }
+
+    // 2) アップロード（load4e.py）
+    const loaderPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app', 'load4e.py')
+      : path.join(__dirname, 'load4e.py');
+    if (!fs.existsSync(loaderPath)) {
+      try { fs.unlinkSync(asmPath); } catch (_) {}
+      try { fs.unlinkSync(hexPath); } catch (_) {}
+      return { success: false, error: 'load4e.py が見つかりません。' };
+    }
+    const port = selectedComPort.device;
+    const loadArgs = [loaderPath, hexPath, '--port', port];
+    const loadProc = spawnSync(pythonCmd, loadArgs, { cwd: path.dirname(loaderPath), windowsHide: true, encoding: 'utf8' });
+
+    // 後始末
+    try { fs.unlinkSync(asmPath); } catch (_) {}
+    try { fs.unlinkSync(hexPath); } catch (_) {}
+
+    if (loadProc.status !== 0) {
+      return { success: false, error: `書き込み失敗:\n${loadProc.stderr || loadProc.stdout || 'unknown error'}` };
+    }
+
+    return { success: true, output: loadProc.stdout || '' };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 
@@ -259,16 +458,14 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
   }
 
   try {
-    // Python実行ファイル選択（インストール前提）
-    function choosePython() {
-      const candidates = process.platform === 'win32' ? ['py', 'python', 'python3'] : ['python3', 'python', 'py'];
-      for (const cmd of candidates) {
-        const r = spawnSync(cmd, ['--version'], { windowsHide: true });
-        if (!r.error && r.status === 0) return cmd;
-      }
-      return null;
+    // venv優先でPythonを選択
+    const { pythonExe } = getVenvPaths();
+    let pythonCmd = null;
+    if (fs.existsSync(pythonExe)) {
+      pythonCmd = pythonExe;
+    } else {
+      pythonCmd = chooseSystemPython();
     }
-    const pythonCmd = choosePython();
     if (!pythonCmd) {
       return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
     }

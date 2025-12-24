@@ -235,25 +235,35 @@ function cancelLabelCreation() {
   window.currentLabelBlock = null;
 }
 
+// 重複リスナー登録防止フラグ
+let eventListenersInitialized = false;
+
 // イベントリスナーの初期化
 function initializeEventListeners() {
-  // Enterキーでの確定
+  if (eventListenersInitialized) return;
+
+  // Enterキーでの確定（1回のみ）
   document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('labelInput').addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') {
-        confirmLabelCreation();
-      } else if (e.key === 'Escape') {
-        cancelLabelCreation();
-      }
-    });
-  });
-  
-  // メニューアクションリスナー（Electronのメニューからの操作）
+    const input = document.getElementById('labelInput');
+    if (input) {
+      input.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          confirmLabelCreation();
+        } else if (e.key === 'Escape') {
+          cancelLabelCreation();
+        }
+      });
+    }
+  }, { once: true });
+
+  // メニューアクションリスナー（Electronのメニューからの操作）を1回だけ登録
   if (typeof window.electronAPI !== 'undefined') {
     window.electronAPI.onMenuAction((event, action, data) => {
       handleMenuAction(action, data);
     });
   }
+
+  eventListenersInitialized = true;
 }
 
 // メニューアクションハンドラ
@@ -281,6 +291,9 @@ function handleMenuAction(action, data) {
     case 'export-binary':
       exportAssembledBinary();
       break;
+    case 'upload':
+      uploadToDevice();
+      break;
     default:
       console.log('Unknown menu action:', action);
   }
@@ -303,3 +316,33 @@ function initializeApp() {
 document.addEventListener('DOMContentLoaded', function() {
   initializeApp();
 });
+
+// デバイスへアップロード
+async function uploadToDevice() {
+  if (!window.vasmWorkspace) {
+    alert('ワークスペースが初期化されていません。');
+    return;
+  }
+  // 現在のアセンブリ生成（表示と同一ロジック）
+  const code = (typeof window.getAssemblyCode === 'function') ? window.getAssemblyCode() : Blockly.Assembly.workspaceToCode(window.vasmWorkspace);
+  if (!code || code.trim() === '') {
+    alert('アップロードするアセンブリコードがありません。');
+    return;
+  }
+  const arch = (window.architecture === 'HC4E') ? 'HC4E' : 'HC4';
+  try {
+    addOutputMessage('アップロードを開始します...');
+    const res = await window.electronAPI.uploadToDevice(code, arch);
+    if (res.success) {
+      addOutputMessage('アップロード完了');
+      if (res.output) addOutputMessage(res.output.trim());
+      alert('アップロードが完了しました');
+    } else {
+      addOutputMessage('アップロード失敗: ' + res.error, 'error');
+      alert('アップロードに失敗しました:\n' + res.error);
+    }
+  } catch (e) {
+    addOutputMessage('アップロード中にエラー: ' + e.message, 'error');
+    alert('アップロード中にエラーが発生しました: ' + e.message);
+  }
+}

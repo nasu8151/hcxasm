@@ -6,7 +6,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveBlocksFile: (content, filePath) => ipcRenderer.invoke('save-blocks-file', content, filePath),
   showLabelDialog: (defaultValue) => ipcRenderer.invoke('show-label-dialog', defaultValue),
   exportAssembledBinary: (assemblyCode, architecture) => ipcRenderer.invoke('export-assembled-binary', assemblyCode, architecture),
+  uploadToDevice: (assemblyCode, architecture) => ipcRenderer.invoke('upload-to-device', assemblyCode, architecture),
   
   // メニューアクションリスナー
-  onMenuAction: (callback) => ipcRenderer.on('menu-action', callback)
+  onMenuAction: (callback) => ipcRenderer.on('menu-action', callback),
+  // COMポート通知
+  onComPorts: (callback) => ipcRenderer.on('com-ports', (e, ports) => callback(ports)),
+  onComPortSelected: (callback) => ipcRenderer.on('com-port-selected', (e, port) => callback(port))
 });
