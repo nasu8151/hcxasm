@@ -110,8 +110,11 @@ async function exportAssembledBinary() {
       
       if (result.success) {
         addOutputMessage(`バイナリファイルが生成されました: ${result.filePath}`);
-        if (result.output) {
-          addOutputMessage('hcxasm.py の出力:');
+        // upload と同一形式でログを表示
+        if (Array.isArray(result.logs)) {
+          result.logs.forEach(line => addOutputMessage(line));
+        } else if (result.output) {
+          addOutputMessage('Assembler stdout:');
           addOutputMessage(result.output.trim());
         }
         alert('バイナリファイルが生成されました: ' + result.filePath);
@@ -333,6 +336,10 @@ async function uploadToDevice() {
   try {
     addOutputMessage('アップロードを開始します...');
     const res = await window.electronAPI.uploadToDevice(code, arch);
+    // 実行したコマンドとプロセス出力を表示
+    if (res.logs && Array.isArray(res.logs)) {
+      res.logs.forEach(line => addOutputMessage(line));
+    }
     if (res.success) {
       addOutputMessage('アップロード完了');
       if (res.output) addOutputMessage(res.output.trim());

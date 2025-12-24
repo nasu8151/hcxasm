@@ -296,20 +296,32 @@ app.on('window-all-closed', () => {
   }
 });
 
-// デバイスへアップロード
+// デバイスへアップロード（クリーン版）
 ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => {
   try {
     if (!selectedComPort || !selectedComPort.device) {
       return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select から選択してください。' };
     }
 
-    // venv優先でPython
+    // venv優先でPythonを選択
     const { pythonExe } = getVenvPaths();
     let pythonCmd = null;
-    if (fs.existsSync(pythonExe)) pythonCmd = pythonExe; else pythonCmd = chooseSystemPython();
-    if (!pythonCmd) return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+    if (fs.existsSync(pythonExe)) {
+      pythonCmd = pythonExe;
+    } else {
+      pythonCmd = chooseSystemPython();
+    }
+    if (!pythonCmd) {
+      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+    }
 
     const tmpDir = app.getPath('temp');
+    const logs = [];
+    const fmtCmd = (cmd, args) => {
+      const quote = s => (typeof s === 'string' && s.includes(' ')) ? `"${s}"` : `${s}`;
+      return [quote(cmd), ...args.map(quote)].join(' ');
+    };
+
     const asmPath = path.join(tmpDir, `va_${Date.now()}.asm`);
     const hexPath = path.join(tmpDir, `va_${Date.now()}.hex`);
     fs.writeFileSync(asmPath, assemblyCode, 'utf8');
@@ -322,12 +334,22 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
       try { fs.unlinkSync(asmPath); } catch (_) {}
       return { success: false, error: 'hcxasm.py が見つかりません。' };
     }
+
     const archArg = (architecture === 'HC4E') ? 'HC4E' : 'HC4';
     const assembleArgs = [hcxasmPath, asmPath, '-o', hexPath, '-f', 'ihex', '-a', archArg];
-    const asmProc = spawnSync(pythonCmd, assembleArgs, { cwd: path.dirname(hcxasmPath), windowsHide: true, encoding: 'utf8' });
+    logs.push('Assembler command: ' + fmtCmd(pythonCmd, assembleArgs));
+    const asmProc = spawnSync(pythonCmd, assembleArgs, {
+      cwd: path.dirname(hcxasmPath),
+      windowsHide: true,
+      encoding: 'utf8',
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+    logs.push('Assembler exit code: ' + asmProc.status);
+    if (asmProc.stdout) logs.push('Assembler stdout:\n' + asmProc.stdout.trim());
+    if (asmProc.stderr) logs.push('Assembler stderr:\n' + asmProc.stderr.trim());
     if (asmProc.status !== 0) {
       try { fs.unlinkSync(asmPath); } catch (_) {}
-      return { success: false, error: `アセンブル失敗:\n${asmProc.stderr || asmProc.stdout || 'unknown error'}` };
+      return { success: false, error: `アセンブル失敗:\n${asmProc.stderr || asmProc.stdout || 'unknown error'}`, logs };
     }
 
     // 2) アップロード（load4e.py）
@@ -341,17 +363,26 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
     }
     const port = selectedComPort.device;
     const loadArgs = [loaderPath, hexPath, '--port', port];
-    const loadProc = spawnSync(pythonCmd, loadArgs, { cwd: path.dirname(loaderPath), windowsHide: true, encoding: 'utf8' });
+    logs.push('Loader command: ' + fmtCmd(pythonCmd, loadArgs));
+    const loadProc = spawnSync(pythonCmd, loadArgs, {
+      cwd: path.dirname(loaderPath),
+      windowsHide: true,
+      encoding: 'utf8',
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+    logs.push('Loader exit code: ' + loadProc.status);
+    if (loadProc.stdout) logs.push('Loader stdout:\n' + loadProc.stdout.trim());
+    if (loadProc.stderr) logs.push('Loader stderr:\n' + loadProc.stderr.trim());
 
     // 後始末
     try { fs.unlinkSync(asmPath); } catch (_) {}
     try { fs.unlinkSync(hexPath); } catch (_) {}
 
     if (loadProc.status !== 0) {
-      return { success: false, error: `書き込み失敗:\n${loadProc.stderr || loadProc.stdout || 'unknown error'}` };
+      return { success: false, error: `書き込み失敗:\n${loadProc.stderr || loadProc.stdout || 'unknown error'}`, logs };
     }
 
-    return { success: true, output: loadProc.stdout || '' };
+    return { success: true, output: loadProc.stdout || '', logs };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -377,67 +408,51 @@ ipcMain.handle('save-assembly-file', async (event, content) => {
     ]
   });
 
-  if (!result.canceled && result.filePath) {
-    try {
-      fs.writeFileSync(result.filePath, content, 'utf8');
-      return { success: true, filePath: result.filePath };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+  if (result.canceled || !result.filePath) {
+    return { success: false, canceled: true };
   }
-  
-  return { success: false, canceled: true };
+
+  try {
+    fs.writeFileSync(result.filePath, content ?? '', 'utf8');
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    return { success: false, error: '保存に失敗しました: ' + err.message };
+  }
 });
 
-// ブロックファイル保存のIPCハンドラ
-ipcMain.handle('save-blocks-file', async (event, content, filePath = null) => {
-  let result;
-  
-  if (filePath) {
-    // 既存のファイルに上書き保存
-    result = { canceled: false, filePath: filePath };
-  } else {
-    // 名前を付けて保存
-    result = await dialog.showSaveDialog({
-      title: 'ブロックファイルを保存',
-      defaultPath: 'workspace.vasm',
-      filters: [
-        { name: 'Visual Assembler Files', extensions: ['vasm'] },
-        { name: 'JSON Files', extensions: ['json'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
-    });
-  }
-
-  if (!result.canceled && result.filePath) {
+// ブロック構成の保存（.vasm/.json）
+ipcMain.handle('save-blocks-file', async (event, content, filePath) => {
+  // filePath が渡されていれば上書き保存（Ctrl+S 用）
+  if (filePath && typeof filePath === 'string') {
     try {
-      fs.writeFileSync(result.filePath, content, 'utf8');
-      return { success: true, filePath: result.filePath };
-    } catch (error) {
-      return { success: false, error: error.message };
+      fs.writeFileSync(filePath, content ?? '', 'utf8');
+      return { success: true, filePath };
+    } catch (err) {
+      return { success: false, error: '保存に失敗しました: ' + err.message };
     }
   }
-  
-  return { success: false, canceled: true };
-});
 
-// 新しいラベル作成用ダイアログ
-ipcMain.handle('show-label-dialog', async (event, defaultValue) => {
-  const { response } = await dialog.showMessageBox({
-    type: 'question',
-    title: '新しいラベルを作成',
-    message: '新しいラベル名を入力してください:',
-    defaultId: 0,
-    buttons: ['OK', 'キャンセル'],
-    detail: 'デフォルト: ' + defaultValue
+  // filePath がない場合はダイアログ表示（Save as 用）
+  const result = await dialog.showSaveDialog({
+    title: 'ブロックファイルを保存',
+    defaultPath: 'program.vasm',
+    filters: [
+      { name: 'Visual Assembler Files', extensions: ['vasm'] },
+      { name: 'JSON Files', extensions: ['json'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
   });
-  
-  if (response === 0) {
-    // 簡易的な入力ダイアログの代替
-    return { success: true, value: defaultValue };
+
+  if (result.canceled || !result.filePath) {
+    return { success: false, canceled: true };
   }
-  
-  return { success: false, canceled: true };
+
+  try {
+    fs.writeFileSync(result.filePath, content ?? '', 'utf8');
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    return { success: false, error: '保存に失敗しました: ' + err.message };
+  }
 });
 
 // バイナリエクスポート用IPCハンドラ
@@ -458,6 +473,11 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
   }
 
   try {
+    const logs = [];
+    const fmtCmd = (cmd, args) => {
+      const quote = s => (typeof s === 'string' && s.includes(' ')) ? `"${s}"` : `${s}`;
+      return [quote(cmd), ...args.map(quote)].join(' ');
+    };
     // venv優先でPythonを選択
     const { pythonExe } = getVenvPaths();
     let pythonCmd = null;
@@ -467,7 +487,7 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
       pythonCmd = chooseSystemPython();
     }
     if (!pythonCmd) {
-      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。', logs };
     }
 
     // 一時的なアセンブリファイルを作成（OSのtemp領域）
@@ -485,7 +505,8 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
       fs.unlinkSync(tempAsmPath);
       return { 
         success: false, 
-        error: 'hcxasm.pyが見つかりません。パス: ' + hcxasmPath 
+        error: 'hcxasm.pyが見つかりません。パス: ' + hcxasmPath,
+        logs
       };
     }
 
@@ -505,11 +526,20 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
         args.push('-f', 'text');
       }
       // .binの場合はデフォルトのbinary形式なので何も追加しない
-      
+      logs.push('Assembler command: ' + fmtCmd(pythonCmd, args));
       const pythonProcess = spawn(pythonCmd, args, {
         cwd: path.dirname(hcxasmPath),
-        windowsHide: true
+        windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
       });
+
+      // Pythonの出力ストリームをUTF-8で受け取る
+      if (pythonProcess.stdout && pythonProcess.stdout.setEncoding) {
+        pythonProcess.stdout.setEncoding('utf8');
+      }
+      if (pythonProcess.stderr && pythonProcess.stderr.setEncoding) {
+        pythonProcess.stderr.setEncoding('utf8');
+      }
 
       let stdout = '';
       let stderr = '';
@@ -530,17 +560,13 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
           console.error('一時ファイルの削除に失敗:', e);
         }
 
+        logs.push('Assembler exit code: ' + code);
+        if (stdout) logs.push('Assembler stdout:\n' + stdout.trim());
+        if (stderr) logs.push('Assembler stderr:\n' + stderr.trim());
         if (code === 0) {
-          resolve({ 
-            success: true, 
-            filePath: result.filePath,
-            output: stdout 
-          });
+          resolve({ success: true, filePath: result.filePath, output: stdout, logs });
         } else {
-          resolve({ 
-            success: false, 
-            error: `アセンブルに失敗しました (終了コード: ${code})\n${stderr || stdout}` 
-          });
+          resolve({ success: false, error: `アセンブルに失敗しました (終了コード: ${code})\n${stderr || stdout}`, logs });
         }
       });
 
@@ -551,18 +577,12 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
         } catch (e) {
           console.error('一時ファイルの削除に失敗:', e);
         }
-        
-        resolve({ 
-          success: false, 
-          error: 'Pythonの実行に失敗しました: ' + err.message 
-        });
+        logs.push('Assembler error: ' + err.message);
+        resolve({ success: false, error: 'Pythonの実行に失敗しました: ' + err.message, logs });
       });
     });
 
   } catch (error) {
-    return { 
-      success: false, 
-      error: 'ファイル操作に失敗しました: ' + error.message 
-    };
+    return { success: false, error: 'ファイル操作に失敗しました: ' + error.message };
   }
 });
