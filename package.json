@@ -34,8 +34,7 @@
       "assets/**/*",
       "hcxasm.py",
       "load4e.py",
-      "assembler.py",
-      "dictionaly.py"
+      "py/**/*"
     ],
     "win": {
       "target": [

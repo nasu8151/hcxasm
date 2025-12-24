@@ -1,4 +1,4 @@
-import dictionaly as dict
+import py.dictionaly as dict
 import re
 
 def assembleline(line:str, line_number:int, architecture:str = "HC4") -> dict.ListObject:

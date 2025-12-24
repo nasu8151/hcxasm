@@ -18,8 +18,8 @@ import argparse
 import sys
 import os
 from pathlib import Path
-import assembler
-import dictionaly
+import py.assembler as assembler
+import py.dictionaly as dictionaly
 
 
 def parse_arguments():
