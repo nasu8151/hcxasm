@@ -23,7 +23,7 @@
     "directories": {
       "output": "dist"
     },
-    "asar": false,
+    "asar": true,
     "files": [
       "main.js",
       "preload.js",
@@ -32,6 +32,11 @@
       "js/**/*",
       "css/**/*",
       "assets/**/*",
+      "hcxasm.py",
+      "load4e.py",
+      "py/**/*"
+    ],
+    "asarUnpack": [
       "hcxasm.py",
       "load4e.py",
       "py/**/*"

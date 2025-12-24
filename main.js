@@ -316,7 +316,7 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
 
     // 1) アセンブル（ihex）
     const hcxasmPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', 'hcxasm.py')
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'hcxasm.py')
       : path.join(__dirname, 'hcxasm.py');
     if (!fs.existsSync(hcxasmPath)) {
       try { fs.unlinkSync(asmPath); } catch (_) {}
@@ -332,7 +332,7 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
 
     // 2) アップロード（load4e.py）
     const loaderPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', 'load4e.py')
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'load4e.py')
       : path.join(__dirname, 'load4e.py');
     if (!fs.existsSync(loaderPath)) {
       try { fs.unlinkSync(asmPath); } catch (_) {}
@@ -476,7 +476,7 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
 
     // hcxasm.pyのパス（パッケージ時は resources/app 直下、開発時はソース直下）
     const hcxasmPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', 'hcxasm.py')
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'hcxasm.py')
       : path.join(__dirname, 'hcxasm.py');
     
     // hcxasm.pyが存在するかチェック
