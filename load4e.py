@@ -3,6 +3,8 @@ import sys
 import argparse
 import time
 import json
+import threading
+import queue
 
 def arg_parse():
     parser = argparse.ArgumentParser(description="Load binary data to HC4e via serial port.")
@@ -10,6 +12,7 @@ def arg_parse():
     parser.add_argument("--file", help="Path to the intelhex file to load.")
     parser.add_argument("--port", required=True, help="Serial port to use (e.g., COM3 or /dev/ttyUSB0).")
     parser.add_argument("--baudrate", type=int, default=115200, help="Baud rate for serial communication.")
+    parser.add_argument("-j", "--json", action="store_true", help="Output in JSON format where applicable.")
     return parser.parse_args()
 
 def main():
@@ -55,12 +58,18 @@ def load(args):
 def register(args):
     try:
         with serial.Serial(args.port, args.baudrate, timeout=1) as ser:
-            print(f"Reading registers from HC4e via {args.port} at {args.baudrate} baud...")
             ser.write(b'rc\n')  # Command to read registers
             ser.readline()  # Discard the first line (header)
             res = ser.readline()
             regs = list(map(int, res.decode().strip().split(',')))
-            print(json.dumps({"regs": regs[0:15], "pc": regs[16], "inst": regs[17]}, indent=2))
+            if args.json:
+                print(json.dumps({"regs": regs[0:16], "pc": regs[16], "inst": regs[17]}))
+            else:
+                print("Registers:")
+                for i in range(16):
+                    print(f"R{i}: {regs[i]}", end='  ')
+                print()
+                print(f"PC: {regs[16]}, INST: {regs[17]}")
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
         sys.exit(1)
@@ -68,22 +77,53 @@ def register(args):
 def trace(args):
     try:
         with serial.Serial(args.port, args.baudrate, timeout=1) as ser:
-            print(f"Tracing execution on HC4e via {args.port} at {args.baudrate} baud...")
+            if not args.json:
+                print(f"Tracing execution on HC4e via {args.port} at {args.baudrate} baud...")
             ser.write(b't\n')  # Command to trace execution
+            ser.readline()  # Discard the first line (header)
+            ser.readline()  # Discard the second line (header)
+            # 士郎、僕はね、ノンブロッキングな標準入力が欲しかっただけなんだ
+            q = queue.Queue()
+            worker = threading.Thread(target=tracewk, args=(args.json, ser, q))
+            worker.start()
             try:
-                while True:
-                    line = ser.readline()
-                    if not line:
-                        continue
-                    print(line.decode().strip())
-                    time.sleep(0.1)
+                while worker.is_alive():
+                    com = input()
+                    if com:
+                        q.put(com)
+                    if com.strip().lower() == 'q':
+                        break
             except KeyboardInterrupt:
                 print("Trace interrupted by user.")
-            ser.write(b'\x03')  # Send Ctrl-C to stop tracing
-            time.sleep(0.5)
+                q.put('q')
+            worker.join()
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
         sys.exit(1)
+
+def tracewk(jso:bool, ser:serial.Serial, q:queue.Queue):
+    try:
+        while True:
+            res = ser.readline()
+            if not q.empty():
+                com = q.get()
+                ser.write(com.encode() + b'\n')
+                if com.strip().lower() == 'q':
+                    break
+            regs = list(map(int, res.decode().strip().split(',')))
+            if not res:
+                continue
+            if jso:
+                print(json.dumps({"regs": regs[0:16], "pc": regs[16], "inst": regs[17]}))
+            else:
+                for i in range(16):
+                    print(f"R{i}: {regs[i]}", end='  ')
+                print()
+                print(f"PC: {regs[16]}, INST: {regs[17]}")
+        ser.write(b'\x03')  # Send Ctrl-C to stop tracing
+    except serial.SerialException as e:
+        print(f"Serial communication error during tracing: {e}")
+
 
 if __name__ == "__main__":
     main()

@@ -7,6 +7,10 @@ const { spawn, spawnSync } = require('child_process');
 let availablePorts = [];
 let selectedComPort = null;
 
+// トレースプロセス管理
+let traceProcess = null;
+let traceTarget = null; // WebContents
+
 // --- Python仮想環境の用意 ---
 function getVenvPaths() {
   const venvRoot = path.join(app.getPath('userData'), 'python-venv');
@@ -362,7 +366,7 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
       return { success: false, error: 'load4e.py が見つかりません。' };
     }
     const port = selectedComPort.device;
-    const loadArgs = [loaderPath, hexPath, '--port', port];
+    const loadArgs = [loaderPath, 'load', '--file', hexPath, '--port', port];
     logs.push('Loader command: ' + fmtCmd(pythonCmd, loadArgs));
     const loadProc = spawnSync(pythonCmd, loadArgs, {
       cwd: path.dirname(loaderPath),
@@ -393,6 +397,178 @@ app.on('activate', () => {
   // macOSでは、アプリがアクティブになってウィンドウがない場合、新しいウィンドウを作成
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
+  }
+});
+
+// レジスタ取得（load4e.py register）
+ipcMain.handle('fetch-registers', async () => {
+  try {
+    if (!selectedComPort || !selectedComPort.device) {
+      return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select で選択してください。' };
+    }
+    // Pythonを選択（venv優先）
+    const { pythonExe } = getVenvPaths();
+    let pythonCmd = null;
+    if (fs.existsSync(pythonExe)) {
+      pythonCmd = pythonExe;
+    } else {
+      pythonCmd = chooseSystemPython();
+    }
+    if (!pythonCmd) {
+      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+    }
+
+    const loaderPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'load4e.py')
+      : path.join(__dirname, 'load4e.py');
+    if (!fs.existsSync(loaderPath)) {
+      return { success: false, error: 'load4e.py が見つかりません。' };
+    }
+
+    const args = [loaderPath, 'register', '--json', '--port', selectedComPort.device];
+    const r = spawnSync(pythonCmd, args, {
+      cwd: path.dirname(loaderPath),
+      windowsHide: true,
+      encoding: 'utf8',
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+
+    if (r.status !== 0) {
+      return { success: false, error: (r.stderr || r.stdout || 'register 実行に失敗しました') };
+    }
+    let data = null;
+    try {
+      data = JSON.parse(r.stdout || '{}');
+    } catch (e) {
+      return { success: false, error: 'JSON解析に失敗しました: ' + e.message, raw: r.stdout };
+    }
+    return { success: true, data };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// トレース開始（load4e.py trace --json）
+ipcMain.handle('start-trace', async (event) => {
+  try {
+    if (traceProcess) {
+      return { success: true, alreadyRunning: true };
+    }
+    if (!selectedComPort || !selectedComPort.device) {
+      return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select で選択してください。' };
+    }
+
+    const { pythonExe } = getVenvPaths();
+    let pythonCmd = null;
+    if (fs.existsSync(pythonExe)) {
+      pythonCmd = pythonExe;
+    } else {
+      pythonCmd = chooseSystemPython();
+    }
+    if (!pythonCmd) {
+      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+    }
+
+    const loaderPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'load4e.py')
+      : path.join(__dirname, 'load4e.py');
+    if (!fs.existsSync(loaderPath)) {
+      return { success: false, error: 'load4e.py が見つかりません。' };
+    }
+
+    // CLI 実行と同じ形: load4e.py trace --port COMxx -j
+    const args = [loaderPath, 'trace', '--port', selectedComPort.device, '-j'];
+    const proc = spawn(pythonCmd, args, {
+      cwd: path.dirname(loaderPath),
+      windowsHide: true,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' }
+    });
+
+    if (proc.stdout && proc.stdout.setEncoding) {
+      proc.stdout.setEncoding('utf8');
+    }
+    if (proc.stderr && proc.stderr.setEncoding) {
+      proc.stderr.setEncoding('utf8');
+    }
+
+    traceProcess = proc;
+    traceTarget = event.sender;
+
+    let buffer = '';
+    proc.stdout.on('data', (data) => {
+      buffer += data.toString();
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (traceTarget && !traceTarget.isDestroyed()) {
+            traceTarget.send('trace-update', obj);
+          }
+        } catch (e) {
+          if (traceTarget && !traceTarget.isDestroyed()) {
+            traceTarget.send('trace-error', 'JSON parse error: ' + e.message);
+          }
+        }
+      }
+    });
+
+    proc.stderr.on('data', (data) => {
+      const msg = data.toString();
+      if (traceTarget && !traceTarget.isDestroyed()) {
+        traceTarget.send('trace-error', msg);
+      }
+    });
+
+    const cleanup = (info) => {
+      traceProcess = null;
+      if (traceTarget && !traceTarget.isDestroyed()) {
+        traceTarget.send('trace-stopped', info);
+      }
+      traceTarget = null;
+    };
+
+    proc.on('close', (code, signal) => {
+      cleanup({ code, signal });
+    });
+
+    proc.on('error', (err) => {
+      cleanup({ error: err.message });
+    });
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// トレース停止
+ipcMain.handle('stop-trace', async () => {
+  try {
+    if (!traceProcess) {
+      return { success: true, alreadyStopped: true };
+    }
+    try {
+      // 終了要求として標準入力に "q\n" を送る
+      if (traceProcess.stdin && !traceProcess.stdin.destroyed) {
+        traceProcess.stdin.write('q\n', 'utf8', () => {
+          try {
+            traceProcess.stdin.end();
+          } catch (e) {
+            // ignore
+          }
+        });
+      } else {
+        // stdin が使えない場合のフォールバック
+        traceProcess.kill();
+      }
+    } catch (e) {
+      // ignore
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 

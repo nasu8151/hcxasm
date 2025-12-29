@@ -309,6 +309,7 @@ function initializeApp() {
     // Blocklyワークスペースを初期化
     window.vasmWorkspace = initializeWorkspace();
     console.log('[INFO] Visual Assembler initialized successfully');
+    // レジスタ初期表示（必要なら自動取得も可能だが、明示ボタン優先）
   }, 50);
   
   // イベントリスナーを初期化
@@ -351,5 +352,129 @@ async function uploadToDevice() {
   } catch (e) {
     addOutputMessage('アップロード中にエラー: ' + e.message, 'error');
     alert('アップロード中にエラーが発生しました: ' + e.message);
+  }
+}
+
+function renderRegisterData(data) {
+  const statusEl = document.getElementById('registerStatus');
+  const outEl = document.getElementById('registerOutput');
+  if (!data) {
+    if (statusEl) statusEl.textContent = 'データなし';
+    if (outEl) outEl.textContent = '';
+    return;
+  }
+
+  // 期待JSON: { regs: [...], pc: <num>, inst: <num> }
+  const regs = Array.isArray(data?.regs) ? data.regs : [];
+  const pc = data?.pc;
+  const inst = data?.inst;
+
+  // テーブル風整形表示
+  const maxRegs = 16;
+  const labels = [];
+  const values = [];
+  for (let i = 0; i < maxRegs; i++) {
+    labels.push(`R${i}`);
+    const v = typeof regs[i] !== 'undefined' ? regs[i] : '';
+    values.push(String(v));
+  }
+  const headerLine = labels.join('\t');
+  const valueLine = values.join('\t');
+
+  const pcPart = (typeof pc !== 'undefined') ? `PC: ${pc}` : '';
+  const instPart = (typeof inst !== 'undefined') ? `INST: ${inst.toString(16).toUpperCase().padStart(2, '0')}` : '';
+  const thirdLine = [pcPart, instPart].filter(Boolean).join('    ');
+
+  const lines = [headerLine, valueLine];
+  if (thirdLine) lines.push(thirdLine);
+
+  if (outEl) outEl.textContent = lines.join('\n');
+  if (statusEl) statusEl.textContent = '取得成功';
+}
+
+// レジスタ取得（1回）
+async function fetchRegisters() {
+  const statusEl = document.getElementById('registerStatus');
+  const outEl = document.getElementById('registerOutput');
+  if (statusEl) statusEl.textContent = '取得中…';
+  if (outEl) outEl.textContent = '';
+
+  if (typeof window.electronAPI === 'undefined') {
+    if (statusEl) statusEl.textContent = 'Electron環境でのみ利用できます';
+    return;
+  }
+  try {
+    const res = await window.electronAPI.fetchRegisters();
+    if (!res.success) {
+      if (statusEl) statusEl.textContent = '取得失敗';
+      if (outEl) outEl.textContent = res.error || '不明なエラー';
+      return;
+    }
+    renderRegisterData(res.data);
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '取得失敗';
+    if (outEl) outEl.textContent = e.message;
+  }
+}
+
+// トレース制御
+let isTracing = false;
+let traceListenersInitialized = false;
+
+function ensureTraceListeners() {
+  if (traceListenersInitialized || typeof window.electronAPI === 'undefined') return;
+  window.electronAPI.onTraceUpdate((data) => {
+    renderRegisterData(data);
+  });
+  window.electronAPI.onTraceError((msg) => {
+    const statusEl = document.getElementById('registerStatus');
+    if (statusEl) statusEl.textContent = 'トレースエラー';
+    const outEl = document.getElementById('registerOutput');
+    if (outEl && msg) {
+      outEl.textContent = (outEl.textContent ? outEl.textContent + '\n' : '') + msg;
+    }
+  });
+  window.electronAPI.onTraceStopped((info) => {
+    isTracing = false;
+    const btn = document.getElementById('traceButton');
+    if (btn) btn.textContent = 'トレース';
+    const statusEl = document.getElementById('registerStatus');
+    if (statusEl) statusEl.textContent = '停止';
+  });
+  traceListenersInitialized = true;
+}
+
+async function toggleTrace() {
+  if (typeof window.electronAPI === 'undefined') {
+    alert('トレース機能はElectronアプリでのみ利用できます。');
+    return;
+  }
+  ensureTraceListeners();
+
+  const btn = document.getElementById('traceButton');
+  const statusEl = document.getElementById('registerStatus');
+
+  if (!isTracing) {
+    // 開始
+    if (statusEl) statusEl.textContent = 'トレース開始中…';
+    const res = await window.electronAPI.startTrace();
+    if (!res.success) {
+      if (statusEl) statusEl.textContent = 'トレース開始失敗';
+      alert('トレース開始に失敗しました:\n' + (res.error || '不明なエラー'));
+      return;
+    }
+    isTracing = true;
+    if (btn) btn.textContent = '停止';
+    if (statusEl) statusEl.textContent = 'トレース中';
+  } else {
+    // 停止
+    const res = await window.electronAPI.stopTrace();
+    if (!res.success) {
+      alert('トレース停止に失敗しました:\n' + (res.error || '不明なエラー'));
+      return;
+    }
+    isTracing = false;
+    if (btn) btn.textContent = 'トレース';
+    if (statusEl) statusEl.textContent = '停止';
   }
 }

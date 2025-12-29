@@ -28,6 +28,7 @@
       <div class="tab-header">
         <button class="tab-button active" onclick="switchTab('assembly')">アセンブリ</button>
         <button class="tab-button" onclick="switchTab('output')">出力</button>
+        <button class="tab-button" onclick="switchTab('register')">レジスタ</button>
       </div>
       <div class="tab-content">
         <div id="assemblyTab" class="tab-pane active">
@@ -35,6 +36,14 @@
         </div>
         <div id="outputTab" class="tab-pane">
           <div id="messageOutput">出力メッセージがここに表示されます...</div>
+        </div>
+        <div id="registerTab" class="tab-pane">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <button onclick="fetchRegisters()">更新</button>
+            <button id="traceButton" onclick="toggleTrace()">トレース</button>
+            <span id="registerStatus" style="color:#666;"></span>
+          </div>
+          <div id="registerOutput">レジスタの内容がここに表示されます...</div>
         </div>
       </div>
     </div>

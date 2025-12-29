@@ -97,7 +97,7 @@ div[style*="margin-bottom"] {
 }
 
 /* 出力結果表示エリア */
-#output, #messageOutput {
+#output, #messageOutput, #registerOutput {
   height: 100%;
   width: 100%;
   border: none;
