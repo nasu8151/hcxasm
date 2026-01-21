@@ -19,7 +19,6 @@ import sys
 import os
 from pathlib import Path
 import py.assembler as assembler
-import py.dictionaly as dictionaly
 
 
 def parse_arguments():
@@ -79,110 +78,6 @@ def read_asm_file(filename:str):
     except Exception as e:
         print(f"エラー: ファイル '{filename}' の読み込み中にエラーが発生しました: {e}", file=sys.stderr)
         sys.exit(1)
-
-
-def assemble_file(lines: list[str], architecture: str, verbose: bool = False):
-    """ファイル全体をアセンブル"""
-    assembled_lines:list[dictionaly.ListObject] = []
-    errors:list[str] = []
-    warnings:list[str] = []
-    
-    if verbose:
-        print(f"アーキテクチャ: {architecture}")
-        print(f"アセンブル開始...")
-        print("-" * 50)
-    
-    # First pass: assemble all lines and collect labels
-    labels:dict[str, int] = {}  # label_name -> address
-    address = 0
-    
-    for line_num, line in enumerate(lines, 1):
-        if verbose:
-            print(f"行 {line_num:3d}: {line}")
-        
-        result = assembler.assembleline(line, line_num, architecture)
-        result.address = address  # Set the current address
-        assembled_lines.append(result)
-        
-        if result.error:
-            errors.append(f"行 {line_num}: {result.error}")
-            if verbose:
-                print(f"         エラー: {result.error}")
-        elif result.machinecode is not None:
-            if verbose:
-                print(f"         機械語: 0x{result.machinecode:02X} @ 0x{address:04X}")
-            address += 1  # Increment address for machine code instructions
-        else:
-            if verbose and line.strip():
-                print(f"         空行/コメント")
-        
-        # Collect labels
-        if result.label:
-            if result.label.name in labels:
-                errors.append(f"行 {line_num}: ラベル '{result.label.name}' が重複しています")
-            else:
-                labels[result.label.name] = address
-                result.label.address = address
-                if verbose:
-                    print(f"         ラベル: {result.label.name} = 0x{address:04X}")
-    
-    # Second pass: resolve label references
-    for result in assembled_lines:
-        # Check instruction that requires label resolution
-        if result.machinecode is not None and (result.source[0].upper() == 'LI' or result.source[0].upper() == 'LS'):
-            # Check if the second part is a label reference
-            part = result.source[1]  # Second part is the oprand
-            if part.startswith('#') and ':' in part:
-                # Parse label reference: #label:slice
-                try:
-                    ref_part = part[1:]  # Remove '#'
-                    label_name, slice_str = ref_part.split(':', 1)
-                    slice_index = int(slice_str)
-                    
-                    if label_name not in labels:
-                        errors.append(f"行 {result.linenum}: 未定義のラベル '{label_name}'")
-                        continue
-                    
-                    label_address = labels[label_name]
-                    
-                    # Extract the specified slice (nibble)
-                    if slice_index == 3:
-                        nibble = (label_address >> 12) & 0xF  # bits [15:12]
-                    elif slice_index == 2:
-                        nibble = (label_address >> 8) & 0xF   # bits [11:8]
-                    elif slice_index == 1:
-                        nibble = (label_address >> 4) & 0xF   # bits [7:4]
-                    elif slice_index == 0:
-                        nibble = label_address & 0xF          # bits [3:0]
-                    else:
-                        errors.append(f"行 {result.linenum}: 無効なスライス '{slice_index}' (0-3の範囲である必要があります)")
-                        continue
-                    
-                    # Update the machine code with the resolved address
-                    # Extract the opcode and replace the operand
-                    opcode = result.machinecode & 0xF0
-                    result.machinecode = opcode | nibble
-                    
-                    if verbose:
-                        print(f"         ラベル解決: {part} -> {label_name}[{slice_index}] = 0x{nibble:X}")
-                    
-                except (ValueError, IndexError) as e:
-                    errors.append(f"行 {result.linenum}: ラベル参照の解析エラー '{part}': {e}")
-    
-    if verbose:
-        print("-" * 50)
-    
-    return assembled_lines, errors, warnings
-
-
-def generate_machine_code(assembled_lines: list[dictionaly.ListObject]):
-    """機械語コードのバイト列を生成"""
-    machine_code: list[int] = []
-    for result in assembled_lines:
-        if result.machinecode is not None:
-            machine_code.append(result.machinecode)
-    return machine_code
-
 
 def write_binary_output(filename:str, machine_code:list[int]):
     """バイナリ形式で出力"""
@@ -343,20 +238,6 @@ def main():
     
     # アセンブリファイルの読み込み
     lines = read_asm_file(args.input_file)
-    
-    # アセンブル実行
-    assembled_lines, errors, warnings = assemble_file(lines, args.architecture, args.verbose)
-    
-    # エラーチェック
-    if errors:
-        print("アセンブルエラーが発生しました:", file=sys.stderr)
-        for error in errors:
-            print(f"  {error}", file=sys.stderr)
-        sys.exit(1)
-    
-    # 機械語コード生成
-    machine_code = generate_machine_code(assembled_lines)
-    
     # 出力ファイル書き込み
     success = False
     if args.format == 'binary':
