@@ -82,7 +82,7 @@ def trace(args):
             ser.write(b't\n')  # Command to trace execution
             ser.readline()  # Discard the first line (header)
             ser.readline()  # Discard the second line (header)
-            # 士郎、僕はね、ノンブロッキングな標準入力が欲しかっただけなんだ
+            # 士郎、僕はね、ノンブロッキングな標準入力が欲しかったんだよ
             q = queue.Queue()
             worker = threading.Thread(target=tracewk, args=(args.json, ser, q))
             worker.start()
@@ -120,7 +120,7 @@ def tracewk(jso:bool, ser:serial.Serial, q:queue.Queue):
                     print(f"R{i}: {regs[i]}", end='  ')
                 print()
                 print(f"PC: {regs[16]}, INST: {regs[17]}")
-        ser.write(b'\x03')  # Send Ctrl-C to stop tracing
+        ser.write(b'\x03\n')  # Send Ctrl-C to stop tracing
     except serial.SerialException as e:
         print(f"Serial communication error during tracing: {e}")
 

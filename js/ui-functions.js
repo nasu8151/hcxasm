@@ -53,7 +53,6 @@ async function saveAssemblyFile() {
       const result = await window.electronAPI.saveAssemblyFile(code);
       if (result.success) {
         addOutputMessage(`アセンブリファイルが保存されました: ${result.filePath}`);
-        alert('ファイルが保存されました: ' + result.filePath);
       } else if (result.canceled) {
         addOutputMessage('アセンブリファイルの保存がキャンセルされました');
       } else {
@@ -152,7 +151,6 @@ async function saveBlocksFile(saveAs = false) {
     if (result.success) {
       currentFilePath = result.filePath;
       addOutputMessage(`ブロックファイルが保存されました: ${result.filePath}`);
-      alert('ブロックファイルが保存されました: ' + result.filePath);
     } else if (result.canceled) {
       addOutputMessage('ブロックファイルの保存がキャンセルされました');
     } else {
