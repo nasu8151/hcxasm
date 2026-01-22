@@ -184,7 +184,7 @@ def determine_output_filename(input_file:str, output_file:str, format_type:str):
     extensions = {
         'binary': '.bin',
         'hex': '.hex',
-        'text': '.txt'
+        'text': '.lst'
     }
     
     return base_name + extensions[format_type]

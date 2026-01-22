@@ -2,7 +2,10 @@ from types import FunctionType
 
 def expect(expected, func : FunctionType, *args, **kwargs):
     result = func(*args, **kwargs)
-    assert result == expected
+    try:
+        assert result == expected
+    except AssertionError:
+        raise AssertionError(f"[FAIL] {func.__name__}({args}, {kwargs}) == {result}, expected {expected}")
     restructured_args = ", ".join(repr(a) for a in args)
     restructured_kwargs = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
     if restructured_kwargs:
