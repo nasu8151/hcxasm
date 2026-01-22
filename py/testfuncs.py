@@ -6,14 +6,14 @@ def expect(expected, func : FunctionType, *args, **kwargs):
         assert result == expected
     except AssertionError:
         raise AssertionError(f"[FAIL] {func.__name__}({args}, {kwargs}) == {result}, expected {expected}")
-    restructured_args = ", ".join(repr(a) for a in args)
-    restructured_kwargs = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
-    if restructured_kwargs:
-        if restructured_args:
-            restructured_args += ", " + restructured_kwargs
+    restored_args = ", ".join(repr(a) for a in args)
+    restored_kwargs = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+    if restored_kwargs:
+        if restored_args:
+            restored_args += ", " + restored_kwargs
         else:
-            restructured_args = restructured_kwargs
-    print(f"[OK] {func.__name__}({restructured_args}) == {expected}")
+            restored_args = restored_kwargs
+    print(f"[OK] {func.__name__}({restored_args}) == {expected}")
 
 def expect_raises(exc_type, func : FunctionType, *args, **kwargs):
     try:
