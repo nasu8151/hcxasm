@@ -110,9 +110,10 @@ def tracewk(jso:bool, ser:serial.Serial, q:queue.Queue):
                 ser.write(com.encode() + b'\n')
                 if com.strip().lower() == 'q':
                     break
-            regs = list(map(int, res.decode().strip().split(',')))
+            
             if not res:
                 continue
+            regs = list(map(int, res.decode().strip().split(',')))
             if jso:
                 print(json.dumps({"regs": regs[0:16], "pc": regs[16], "inst": regs[17]}))
             else:

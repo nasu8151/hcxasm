@@ -56,7 +56,7 @@ def parse_arguments():
                         help='Target architecture (default: HC4)')
     
     parser.add_argument('-f', '--format',
-                        choices=['binary', 'hex', 'ihex', 'vhex', 'text'],
+                        choices=['binary', 'hex', 'ihex', 'vhex', 'text', 'list'],
                         default='binary',
                         help='Output format (default: binary)')
     
@@ -142,12 +142,12 @@ def write_intel_hex_output(filename:str, machine_code:list[tuple[int, int]]):
         return False
 
 
-def write_list_output(filename:str, lines:Sequence[tuple[str, int]], machine_code: Sequence[tuple[int, int]], ls:assembler.LinkState):
+def write_list_output(filename:str, lines:Sequence[tuple[str, int, str]], machine_code: Sequence[tuple[int, int]], ls:assembler.LinkState):
     """
     Write output in text format with machine code and source code correspondence.
     Args:
         filename (str): Output text file name.
-        lines (Sequence[tuple[str, int]]): List of tuple(line:str, lineno:int).
+        lines (Sequence[tuple[str, int, str]]): List of tuple(line:str, lineno:int, unprocessed_line:str).
         machine_code (Sequence[tuple[int, int]]): List of assembled lines with machine code and line numbers.
     Returns:
         bool: True if writing is successful, False otherwise.
@@ -162,18 +162,18 @@ def write_list_output(filename:str, lines:Sequence[tuple[str, int]], machine_cod
                 f.write(f"{label}: {address:04X}\n")
             
             # Machine code and source code correspondence table
-            f.write("address  machine code  source code\n")
+            f.write("line  address  machine code  source code\n")
             f.write("-" * 50 + "\n")
             
             address = 0
             for result in lines:
-                source_line, line_num = result
+                source_line, line_num, unprocessed_line = result
                 if address < len(machine_code) and machine_code[address][1] == line_num:
                     byte_val, _ = machine_code[address]
-                    f.write(f"{address:04X}     {byte_val:02X}          {source_line}\n")
+                    f.write(f"{line_num:4d}  {address:04X}     {byte_val:02X}            {unprocessed_line}\n")
                     address += 1
                 else:
-                    f.write(f"                 {source_line}\n")
+                    f.write(f"{line_num:4d}  {address:04X}                   {unprocessed_line}\n")
 
             
             f.write("\n" + "-" * 50 + "\n")
@@ -236,7 +236,8 @@ def main(args):
     # Write output file
     processed_lines = assembler.preprocess(lines)
     ls = assembler.LinkState()
-    machine_code = assembler.assemble(processed_lines, ls, args.architecture)
+    
+    machine_code = assembler.assemble(tuple((pl[0], pl[1]) for pl in processed_lines), ls, args.architecture)
 
     success = False
     if args.format == 'binary':
@@ -251,6 +252,13 @@ def main(args):
     if not success:
         sys.exit(1)
 
+    print(f"[Info] Assembled {machine_code[-1][1]} lines into {len(machine_code)} bytes.")
+    if args.verbose:
+        print(f"[Info] Architecture: {args.architecture}")
+        print(f"[Info] Output format: {args.format}")
+        print(f"[Info] Defined labels: ")
+        for label, address in ls.labels.items():
+            print(f"       {label}: {address:04X}")
     print(f"[OK] Done. Output written to '{output_filename}'.")
 
 if __name__ == "__main__":

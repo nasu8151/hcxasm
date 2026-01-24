@@ -207,6 +207,7 @@ __marimo__/
 # Custom ignore rules for specific files or directories
 # These rules are specific to the project and should not be modified without understanding their purpose
 test/
+__temp__/
 
 # JS
 node_modules/

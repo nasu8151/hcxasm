@@ -70,6 +70,8 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
     machine_code: list[tuple[int, int]] = []
 
     for line, lineno in code:
+        if line.strip() == "":
+            continue
         tok = line.strip().split(" ")
 
         if tok[0].upper().endswith(":"):
@@ -81,7 +83,7 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
 
         opcode = INST_DICT.get(tok[0].upper())
         if opcode is None:
-            raise KeyError(f"[Error] Invalid instruction: {tok[0]}")
+            raise KeyError(f"[Error] Invalid instruction: {tok[0]} in line {lineno}")
 
         # assemble lines
         match INST_TYPES.get(tok[0].upper()):
@@ -92,7 +94,7 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
             case insttype.REGISTER:
                 oprand = int(re.findall(r"r([0-9]*)", tok[1])[0])
                 if oprand > 15:
-                    raise ValueError(f"Too big register designator : {oprand}")
+                    raise ValueError(f"Too big register designator : {oprand} in line {lineno}")
                 machine_code.append((opcode + oprand, lineno))
             case insttype.IMMEDIATE:
                 label = re.findall(r"#([A-Za-z_][A-Za-z0-9_]*:[0-3])", tok[1])
@@ -100,9 +102,11 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
                     ls.add_unresolved(label[0], len(machine_code))
                     machine_code.append((opcode, lineno))
                     continue
-                oprand = int(re.findall(r"#([0-9]*)", tok[1])[0])
+                oprand = int(tok[1][1:], 0)
                 if oprand > 15:
-                    raise ValueError(f"Too big immediate value : {oprand}")
+                    raise ValueError(f"Too big immediate value : {oprand} in line {lineno}")
+                if oprand < 0:
+                    raise ValueError(f"Negative immediate value : {oprand} in line {lineno}")
                 machine_code.append((opcode + oprand, lineno))
             case insttype.JUMP:
                 if len(tok) == 1:
@@ -110,10 +114,10 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
                 else:
                     flag = tok[1].upper()
                     if flag not in JMP_FLAGS:
-                        raise ValueError(f"Invalid jump flag : {flag}")
+                        raise ValueError(f"Invalid jump flag : {flag} in line {lineno}")
                     machine_code.append((opcode + JMP_FLAGS[flag], lineno))
 
-    print(ls)
+    # print(ls)
 
     for addr, label in ls.unresolved.items():
         value = ls.parse_label(label)
@@ -122,35 +126,37 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
         machine_code[addr] = (machine_code[addr][0] + value, machine_code[addr][1])
     return machine_code
 
-def preprocess(lines:Sequence[str]) -> list[tuple[str, int]]:
-    """preprocessor for assembly code: remove comments and empty lines"""
-    processed: list[tuple[str, int]] = []
+def preprocess(lines:Sequence[str]) -> list[tuple[str, int, str]]:
+    """
+    preprocessor for assembly code: remove comments and empty lines
+    Input: list of lines (str)
+    Output: list of tuples (line:str, lineno:int, unprocessed_line:str)
+    """
+    processed: list[tuple[str, int, str]] = []
     for lineno, line in enumerate(lines, start=1):
         # remove comments
+        unprocessed_line = line
         line = re.sub(r";.*$", "", line)
-        # skip empty lines
-        if line.strip() == "":
-            continue
-        processed.append((line, lineno))
+        processed.append((line, lineno, unprocessed_line))
     return processed
 
 def self_test():
     testfuncs.expect([(0x00, 1), (0x1A, 2), (0x2F, 3), (0xA5, 4), (0xE3, 5), (0xE0, 6)], assemble, [
-        ("SM", 1), ("SC r10", 2), ("SU r15", 3), ("LI #5", 4), ("JP NC", 5), ("JP", 6)
-    ])
+        ("SM", 1), ("SC r10", 2), ("SU r15", 3), ("LI #5", 4), ("JP NC", 5), ("JP", 6)], LinkState(), "HC4"
+    )
     testfuncs.expect([(0xE1, 1), (0x00, 2), (0x1C, 3), (0x20, 4), (0xA1, 5), (0xA0, 6), (0xE4, 7), (0xE0, 8)], assemble, [
-        ("NP", 1), ("LOOP: SM", 2), ("SC r12", 3), ("SU r0", 4), ("LI #LOOP:0", 5), ("LI #LOOP:1", 6), ("JP Z", 7), ("JP", 8)
-    ])
-    testfuncs.expect([(0x90, 2), (0xA0, 3), (0xE0, 4)], assemble, preprocess(
+        ("NP", 1), ("LOOP: SM", 2), ("SC r12", 3), ("SU r0", 4), ("LI #LOOP:0", 5), ("LI #LOOP:1", 6), ("JP Z", 7), ("JP", 8)], LinkState(), "HC4"
+    )
+    testfuncs.expect([(0x90, 2), (0xA0, 3), (0xE0, 4)], assemble, tuple((pl[0], pl[1]) for pl in preprocess(
         """; This is a comment line
         LD r0      ; Load to register 0
         LI #0      ; Load immediate 0
         JP         ; Jump
         """.splitlines()
-    ))
-    testfuncs.expect_raises(KeyError, assemble, [("XX r1", 1)])
-    testfuncs.expect_raises(ValueError, assemble, [("SC r16", 1)])
-    testfuncs.expect_raises(ValueError, assemble, [("LI #16", 1)])
+    )), LinkState(), "HC4")
+    testfuncs.expect_raises(KeyError, assemble, [("XX r1", 1)], LinkState(), "HC4")
+    testfuncs.expect_raises(ValueError, assemble, [("SC r16", 1)], LinkState(), "HC4")
+    testfuncs.expect_raises(ValueError, assemble, [("LI #16", 1)], LinkState(), "HC4")
 
     print("[OK] assembler.py : All tests passed.")
 

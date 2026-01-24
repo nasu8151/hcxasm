@@ -1,4 +1,9 @@
 from types import FunctionType
+import difflib
+import os
+from pathlib import Path
+import sys
+import subprocess
 
 def expect(expected, func : FunctionType, *args, **kwargs):
     result = func(*args, **kwargs)
@@ -21,6 +26,35 @@ def expect_raises(exc_type, func : FunctionType, *args, **kwargs):
     except Exception as e:
         assert isinstance(e, exc_type)
         print(f"[OK] Raised expected exception: {e}")
+
+def expect_assemble(expected_file, infile, outfile, format_type='ihex', arch='HC4', extra_args=None):
+    """アセンブル結果が期待通りか確認する"""
+    project_root = Path(__file__).parent.parent
+    cmd = [sys.executable, 'hcxasm.py', infile, '--format', format_type, '--architecture', arch]
+    if outfile:
+        cmd += ['--output', outfile]
+    if extra_args:
+        cmd += extra_args
+    subprocess.run(cmd, check=True, cwd=project_root)
+    
+    # 期待ファイルと出力ファイルを比較
+    with open(expected_file, 'rb') as f:
+        expected_data = f.read()
+    with open(outfile, 'rb') as f:
+        output_data = f.read()
+    
+    if expected_data != output_data:
+        diff = difflib.unified_diff(
+            expected_data.decode(errors='ignore').splitlines(keepends=True),
+            output_data.decode(errors='ignore').splitlines(keepends=True),
+            fromfile='expected',
+            tofile='output'
+        )
+        diff_text = ''.join(diff)
+        raise AssertionError(f"[FAIL] Assembled output does not match expected.\nDiff:\n{diff_text}")
+    
+    print(f"[OK] Assembled output matches expected for {infile}.")
+
 
 def self_test():
     expect(2, lambda x,y: x + y, 1, 1)
