@@ -30,6 +30,9 @@ def expect_raises(exc_type, func : FunctionType, *args, **kwargs):
 def expect_assemble(expected_file, infile, outfile, format_type='ihex', arch='HC4', extra_args=None):
     """アセンブル結果が期待通りか確認する"""
     project_root = Path(__file__).parent.parent
+    temp_dir = project_root / '__temp__'
+    if not temp_dir.exists():
+        temp_dir.mkdir()
     cmd = [sys.executable, 'hcxasm.py', infile, '--format', format_type, '--architecture', arch]
     if outfile:
         cmd += ['--output', outfile]
