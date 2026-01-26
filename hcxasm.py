@@ -31,16 +31,17 @@ def parse_arguments():
         description='HCx(HC4/4e/8) series Assembler',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-出力形式:
-    binary  : バイナリファイル (.bin)
-    hex     : Intel HEXファイル (.hex)  
-    text    : テキストファイル (.txt) - 16進数表記
+Output Formats:
+    binary     : Binary file (.bin)
+    ihex       : Intel HEX file (.hex)
+    hex, vhex  : Verilog HEX file (.hex)
+    list, text : List file with source code correspondence (.lst, .txt)
 
-例:
+Examples:
     python hcxasm.py program.asm
     python hcxasm.py program.asm -o output.bin
-    python hcxasm.py program.asm -a HC4E -f hex
-    python hcxasm.py program.asm -o program.hex -f hex -v
+    python hcxasm.py program.asm -a HC4E -f ihex
+    python hcxasm.py program.asm -o program.hex -f ihex -v
         """
     )
     
@@ -234,7 +235,10 @@ def main(args):
     # Read assembly file
     lines = read_asm_file(args.input_file)
     # Write output file
-    processed_lines = assembler.preprocess(lines)
+    processed_lines = assembler.preprocess(lines, None, False)
+    if args.verbose:
+        print(f"[Info] Preprocessed {len(processed_lines)} lines.")
+        print(processed_lines)
     ls = assembler.LinkState()
     
     machine_code = assembler.assemble(tuple((pl[0], pl[1]) for pl in processed_lines), ls, args.architecture)

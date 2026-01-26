@@ -1,0 +1,17 @@
+.macro ADD RD RS1 RS2
+    LD RS1
+    LD RS2
+    AD RD
+.ENDM
+.macro GOTO LABEL
+    LI #LABEL:2
+    LI #LABEL:1
+    LI #LABEL:0
+    JP
+.ENDM
+.DEFINE NOP NP
+START:  
+    NOP
+    ADD R1 R2 R3
+    GOTO END
+END:

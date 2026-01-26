@@ -126,17 +126,76 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
         machine_code[addr] = (machine_code[addr][0] + value, machine_code[addr][1])
     return machine_code
 
-def preprocess(lines:Sequence[str]) -> list[tuple[str, int, str]]:
+def preprocess(lines:Sequence[str], defs:Optional[dict[str, str]], in_macro:bool) -> list[tuple[str, int, str]]:
     """
     preprocessor for assembly code: remove comments and empty lines
     Input: list of lines (str)
     Output: list of tuples (line:str, lineno:int, unprocessed_line:str)
     """
+    DIRECTIVES = {
+        ".DEF"     : 1,
+        ".DEFINE"  : 1,
+        ".MACRO"   : 2,
+        ".ENDMACRO": 3,
+        ".ENDM"    : 3,
+    }
+    defines: dict[str, str] = defs if defs is not None else {}
+    macros: dict[str, tuple[list[str], list[str]]] = {}
     processed: list[tuple[str, int, str]] = []
-    for lineno, line in enumerate(lines, start=1):
+    lineno = 0
+    while lineno < len(lines):
+        lineno += 1
+        line = lines[lineno - 1]
         # remove comments
         unprocessed_line = line
         line = re.sub(r";.*$", "", line)
+        tok = line.strip().split(" ")
+        directive = DIRECTIVES.get(tok[0].upper(), None)
+        if directive == 1:  # .DEF or .DEFINE
+            if len(tok) < 3:
+                raise ValueError(f"[Error] Invalid .DEF or .DEFINE directive at line {lineno}")
+            defines[tok[1]] = " ".join(tok[2:])
+            processed.append(("", lineno, unprocessed_line))
+            continue
+        elif directive == 2:  # .MACRO
+            if in_macro:
+                raise ValueError(f"[Error] Nested macros are not supported (line {lineno})")
+            if len(tok) < 2:
+                raise ValueError(f"[Error] Invalid .MACRO directive at line {lineno}")
+            macro_name = tok[1].upper()
+            params = tok[2:] if len(tok) > 2 else []
+            macro_lines: list[str] = []
+            for macro_lineno, macro_line in enumerate(lines[lineno:], start=lineno + 1):
+                macro_line_clean = re.sub(r";.*$", "", macro_line)
+                macro_lines.append(macro_line)
+                processed.append(("", macro_lineno, unprocessed_line))
+                if macro_line_clean.strip().upper().startswith((".ENDMACRO", ".ENDM")):
+                    break
+            else:
+                raise ValueError(f"[Error] Missing .ENDMACRO directive for macro {macro_name}")
+            macros[macro_name] = (macro_lines, params)
+            lineno = macro_lineno
+            continue
+        elif directive == 3 and in_macro:  # .ENDMACRO or .ENDM
+            return processed
+        
+        line = line.replace("\t", " ").strip()
+        for def_key, def_value in defines.items():
+            line = re.sub(rf"\b{re.escape(def_key)}\b", def_value, line)
+        # replace defines
+
+        if tok and tok[0].upper() in macros:
+            macro_name = tok[0].upper()
+            macro_args = tok[1:] if len(tok) > 1 else []
+            macro_lines, params = macros[macro_name]
+            if len(macro_args) != len(params):
+                raise ValueError(f"[Error] Macro {macro_name} expects {len(params)} arguments, got {len(macro_args)} (line {lineno})")
+            param_map = dict(zip(params, macro_args))
+            res = preprocess(macro_lines, param_map, True)
+            processed.extend(res)
+            continue
+
+
         processed.append((line, lineno, unprocessed_line))
     return processed
 
@@ -152,8 +211,29 @@ def self_test():
         LD r0      ; Load to register 0
         LI #0      ; Load immediate 0
         JP         ; Jump
-        """.splitlines()
+        """.splitlines(), None, False
     )), LinkState(), "HC4")
+    testfuncs.expect([(0x41, 3), (0x52, 4), (0x63, 5), (0x74, 6)], assemble, tuple((pl[0], pl[1]) for pl in preprocess(
+        """.DEF REG1 r1
+        .DEF REG2 r2
+        XR REG1
+        OR REG2
+        AN r3
+        SA r4
+        """.splitlines(), None, False
+    )), LinkState(), "HC4")
+    processed = tuple((pl[0], pl[1]) for pl in preprocess(
+        """.MACRO ADD_REGS REG_A REG_B
+        LD REG_A
+        LD REG_B
+        AD REG_A
+        .ENDM
+        ADD_REGS r1 r2
+        JP
+        """.splitlines(), None, False
+    ))
+    print(processed)
+    testfuncs.expect([(0x91, 1), (0x92, 2), (0x31, 3), (0xE0, 7)], assemble, processed, LinkState(), "HC4")
     testfuncs.expect_raises(KeyError, assemble, [("XX r1", 1)], LinkState(), "HC4")
     testfuncs.expect_raises(ValueError, assemble, [("SC r16", 1)], LinkState(), "HC4")
     testfuncs.expect_raises(ValueError, assemble, [("LI #16", 1)], LinkState(), "HC4")
