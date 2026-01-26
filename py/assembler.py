@@ -92,7 +92,7 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
             case insttype.INHERENT:
                 machine_code.append((opcode, lineno))
             case insttype.REGISTER:
-                oprand = int(re.findall(r"r([0-9]*)", tok[1])[0])
+                oprand = int(re.findall(r"[rR]([0-9]*)", tok[1])[0])
                 if oprand > 15:
                     raise ValueError(f"Too big register designator : {oprand} in line {lineno}")
                 machine_code.append((opcode + oprand, lineno))
@@ -165,10 +165,11 @@ def preprocess(lines:Sequence[str], defs:Optional[dict[str, str]], in_macro:bool
             macro_name = tok[1].upper()
             params = tok[2:] if len(tok) > 2 else []
             macro_lines: list[str] = []
+            processed.append(("", lineno, unprocessed_line))
             for macro_lineno, macro_line in enumerate(lines[lineno:], start=lineno + 1):
                 macro_line_clean = re.sub(r";.*$", "", macro_line)
                 macro_lines.append(macro_line)
-                processed.append(("", macro_lineno, unprocessed_line))
+                processed.append(("", macro_lineno, macro_line))
                 if macro_line_clean.strip().upper().startswith((".ENDMACRO", ".ENDM")):
                     break
             else:

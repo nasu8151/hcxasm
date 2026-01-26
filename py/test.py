@@ -25,5 +25,12 @@ if __name__ == "__main__":
         format_type='ihex',
         arch='HC4E'
     )
+    tf.expect_assemble(
+        expected_file='py/test_files/macrotest.hex',
+        infile='py/test_files/macrotest.asm',
+        outfile='./__temp__/macrotest.hex',
+        format_type='vhex',
+        arch='HC4'
+    )
 
     print("[OK] test.py : All tests passed.")
