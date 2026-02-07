@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchRegisters: () => ipcRenderer.invoke('fetch-registers'),
   startTrace: () => ipcRenderer.invoke('start-trace'),
   stopTrace: () => ipcRenderer.invoke('stop-trace'),
+  setWorkspaceDirty: (isDirty) => ipcRenderer.send('workspace-dirty', isDirty),
   
   // メニューアクションリスナー
   onMenuAction: (callback) => ipcRenderer.on('menu-action', callback),

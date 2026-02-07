@@ -199,7 +199,7 @@ function makeGotoBlock(type, label, color) {
       console.log('[DEBUG] found', allBlocks.length, 'blocks in workspace');
       
       allBlocks.forEach(function(block) {
-        if (block.type === self.type && block !== self) {
+        if ((block.type === self.type || block.type === 'goto_if' || block.type === 'label_def' || block.type === 'label_hat') && block !== self) {
           console.log('[DEBUG] updating block:', block.id);
           var field = block.getField('LABEL');
           if (field) {
@@ -337,7 +337,7 @@ function makeConditionalGotoBlock(type, label, color) {
       
       allBlocks.forEach(function(block) {
         // ラベル関連ブロックを更新
-        if ((block.type === 'goto' || block.type === 'goto_if' || block.type === 'label_def') && block !== self) {
+        if ((block.type === 'goto' || block.type === 'goto_if' || block.type === 'label_def' || block.type === 'label_hat') && block !== self) {
           console.log('[DEBUG] updating block:', block.id);
           var field = block.getField('LABEL');
           if (field) {
@@ -422,7 +422,7 @@ function makeLabelHatBlock(type, label, color) {
         
         // カスタムラベル一覧に追加
         if (!window.customLabels) {
-          window.customLabels = [];
+          window.customLabels = ['START'];
         }
         
         if (window.customLabels.indexOf(trimmedLabel) === -1) {
@@ -434,6 +434,7 @@ function makeLabelHatBlock(type, label, color) {
         // このブロックの値を更新
         var field = this.getField('LABEL');
         if (field) {
+          field.menuGenerator_ = this.getLabelOptions.bind(this);
           field.setValue(trimmedLabel);
           console.log('[DEBUG] hat block field value set to:', trimmedLabel);
         }
@@ -598,7 +599,7 @@ function makeLabelDefinitionBlock(type, label, color) {
       
       allBlocks.forEach(function(block) {
         // ラベル定義ブロックとGOTOブロック両方を更新
-        if ((block.type === self.type || block.type === 'jp' || block.type === 'goto') && block !== self) {
+        if ((block.type === self.type || block.type === 'jp' || block.type === 'goto' || block.type === 'goto_if' || block.type === 'label_hat') && block !== self) {
           console.log('[DEBUG] updating block:', block.id);
           var field = block.getField('LABEL');
           if (field) {
@@ -620,7 +621,11 @@ function initializeBlocks() {
   }
 
   // カスタムラベルを初期化
-  window.customLabels = ['START', 'LOOP', 'END'];
+  if (!Array.isArray(window.customLabels) || window.customLabels.length === 0) {
+    window.customLabels = ['START', 'LOOP', 'END'];
+  } else if (!window.customLabels.includes('START')) {
+    window.customLabels.unshift('START');
+  }
 
   // 命令ごとにブロックを定義（モードでフィルタ）
   if (window.architecture === 'HC4') {
@@ -861,6 +866,8 @@ function initializeWorkspace() {
     }
   });
 
+  registerDuplicateChainMenu(workspace);
+
   // ハットブロックから開始されるコードを生成する関数
   function generateCodeFromHatBlocks(workspace) {
     var code = '';
@@ -927,9 +934,91 @@ function initializeWorkspace() {
   };
   
   workspace.addChangeListener(updateCode);
+  workspace.addChangeListener((event) => {
+    if (!event) return;
+    if (event.isUiEvent || event.type === Blockly.Events.UI) return;
+    if (typeof window.setWorkspaceDirty === 'function') {
+      window.setWorkspaceDirty(true);
+    }
+  });
   
   // 初期化完了後に一度コードを生成
   setTimeout(updateCode, 100);
   
   return workspace;
+}
+
+function registerDuplicateChainMenu(workspace) {
+  if (!workspace || !Blockly?.ContextMenuRegistry?.registry) return;
+  if (window.duplicateChainMenuRegistered) return;
+
+  const registry = Blockly.ContextMenuRegistry.registry;
+
+  try {
+    registry.unregister('blockDuplicate');
+  } catch (e) {
+    // ignore if not present
+  }
+
+  registry.register({
+    id: 'duplicate-chain',
+    scopeType: Blockly.ContextMenuRegistry.ScopeType.BLOCK,
+    displayText: function() {
+      return 'Duplicate';
+    },
+    preconditionFn: function(scope) {
+      const block = scope.block;
+      if (!block) return 'hidden';
+      if (block.isInFlyout) return 'hidden';
+      if (block.isShadow && block.isShadow()) return 'disabled';
+      return 'enabled';
+    },
+    callback: function(scope) {
+      duplicateBlockChain(scope.block);
+    },
+    weight: 55
+  });
+
+  window.duplicateChainMenuRegistered = true;
+}
+
+function duplicateBlockChain(block) {
+  try {
+    if (!block || !block.workspace) return;
+    const workspace = block.workspace;
+    const chain = [];
+    let current = block;
+    while (current) {
+      chain.push(current);
+      current = current.getNextBlock();
+    }
+
+    let firstNew = null;
+    let prevNew = null;
+    chain.forEach((orig) => {
+      const xml = Blockly.Xml.blockToDom(orig, true);
+      for (let i = xml.childNodes.length - 1; i >= 0; i -= 1) {
+        const node = xml.childNodes[i];
+        if (node && node.nodeType === 1 && node.nodeName.toLowerCase() === 'next') {
+          xml.removeChild(node);
+        }
+      }
+      const newBlock = Blockly.Xml.domToBlock(xml, workspace);
+      if (!firstNew) {
+        firstNew = newBlock;
+      }
+      if (prevNew && prevNew.nextConnection && newBlock?.previousConnection) {
+        prevNew.nextConnection.connect(newBlock.previousConnection);
+      }
+      prevNew = newBlock;
+    });
+
+    const offset = 30;
+    if (firstNew && firstNew.moveBy) {
+      firstNew.moveBy(offset, offset);
+      firstNew.select();
+    }
+  } catch (e) {
+    console.error('[ERROR] failed to duplicate block chain:', e);
+  }
 }

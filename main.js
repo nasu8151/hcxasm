@@ -11,6 +11,9 @@ let selectedComPort = null;
 let traceProcess = null;
 let traceTarget = null; // WebContents
 
+// 未保存状態の管理（webContents.id -> boolean）
+const windowDirtyState = new Map();
+
 // --- Python仮想環境の用意 ---
 function getVenvPaths() {
   const venvRoot = path.join(app.getPath('userData'), 'python-venv');
@@ -270,6 +273,9 @@ function createWindow() {
   const menu = createMenu(mainWindow);
   Menu.setApplicationMenu(menu);
 
+  const webContentsId = mainWindow.webContents.id;
+  windowDirtyState.set(webContentsId, false);
+
   // HTMLファイルをロード
   const htmlFile = path.join(__dirname, 'index.html');
   mainWindow.loadFile(htmlFile);
@@ -283,6 +289,31 @@ function createWindow() {
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
   }
+
+  mainWindow.on('close', (e) => {
+    if (mainWindow.isDestroyed()) return;
+    const isDirty = windowDirtyState.get(webContentsId);
+    if (!isDirty) return;
+
+    const result = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      title: '未保存の変更があります',
+      message: '保存されていない変更があります。閉じますか？',
+      buttons: ['キャンセル', '閉じる'],
+      defaultId: 0,
+      cancelId: 0
+    });
+
+    if (result === 0) {
+      e.preventDefault();
+      return;
+    }
+    windowDirtyState.set(webContentsId, false);
+  });
+
+  mainWindow.on('closed', () => {
+    windowDirtyState.delete(webContentsId);
+  });
 }
 
 // アプリが準備完了したときに実行
@@ -390,6 +421,12 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+// ワークスペースの未保存状態を更新
+ipcMain.on('workspace-dirty', (event, isDirty) => {
+  if (!event || !event.sender) return;
+  windowDirtyState.set(event.sender.id, !!isDirty);
 });
 
 // アプリがアクティブになったとき（macOS用）

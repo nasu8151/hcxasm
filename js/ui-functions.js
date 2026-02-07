@@ -5,6 +5,14 @@
 
 // 現在のファイルパス（Save機能用）
 let currentFilePath = null;
+let isWorkspaceDirty = false;
+
+function setWorkspaceDirty(isDirty) {
+  isWorkspaceDirty = !!isDirty;
+  if (typeof window.electronAPI !== 'undefined' && window.electronAPI.setWorkspaceDirty) {
+    window.electronAPI.setWorkspaceDirty(isWorkspaceDirty);
+  }
+}
 
 // 出力タブにメッセージを表示する関数
 function addOutputMessage(message, type = 'info') {
@@ -141,8 +149,13 @@ async function saveBlocksFile(saveAs = false) {
   }
   
   // Blocklyワークスペースの状態をXMLとして保存
-  const xml = Blockly.serialization.workspaces.save(window.vasmWorkspace);
-  const xmlText = JSON.stringify(xml);
+  const workspaceData = Blockly.serialization.workspaces.save(window.vasmWorkspace);
+  const payload = {
+    version: 2,
+    workspace: workspaceData,
+    customLabels: Array.isArray(window.customLabels) ? window.customLabels : []
+  };
+  const xmlText = JSON.stringify(payload);
   
   try {
     const filePath = saveAs ? null : currentFilePath;
@@ -151,6 +164,7 @@ async function saveBlocksFile(saveAs = false) {
     if (result.success) {
       currentFilePath = result.filePath;
       addOutputMessage(`ブロックファイルが保存されました: ${result.filePath}`);
+      setWorkspaceDirty(false);
     } else if (result.canceled) {
       addOutputMessage('ブロックファイルの保存がキャンセルされました');
     } else {
@@ -175,7 +189,15 @@ function loadBlocksFile(content) {
     
     // JSONからワークスペースを復元
     const data = JSON.parse(content);
-    Blockly.serialization.workspaces.load(data, window.vasmWorkspace);
+    const workspaceData = (data && data.workspace) ? data.workspace : data;
+    const customLabels = Array.isArray(data?.customLabels)
+      ? data.customLabels
+      : extractLabelsFromWorkspaceData(workspaceData);
+    window.customLabels = normalizeLabelList(customLabels);
+
+    Blockly.serialization.workspaces.load(workspaceData, window.vasmWorkspace);
+    refreshLabelDropdowns(window.vasmWorkspace);
+    setWorkspaceDirty(false);
     
     addOutputMessage('ブロックファイルが読み込まれました');
     console.log('[INFO] ブロックファイルが読み込まれました');
@@ -183,6 +205,79 @@ function loadBlocksFile(content) {
     addOutputMessage(`ブロックファイルの読み込みに失敗しました: ${error.message}`, 'error');
     alert('ブロックファイルの読み込みに失敗しました: ' + error.message);
   }
+}
+
+function normalizeLabelList(labels) {
+  const base = Array.isArray(labels) ? labels : [];
+  const result = [];
+  const seen = new Set();
+  base.forEach((label) => {
+    if (typeof label !== 'string') return;
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    if (seen.has(trimmed)) return;
+    seen.add(trimmed);
+    result.push(trimmed);
+  });
+  if (!result.includes('START')) {
+    result.unshift('START');
+  }
+  return result;
+}
+
+function extractLabelsFromWorkspaceData(workspaceData) {
+  const labels = [];
+  const seen = new Set();
+
+  function addLabel(value) {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    labels.push(trimmed);
+  }
+
+  function visitBlock(block) {
+    if (!block || typeof block !== 'object') return;
+    if (block.fields && typeof block.fields === 'object') {
+      addLabel(block.fields.LABEL);
+    }
+    if (block.inputs && typeof block.inputs === 'object') {
+      Object.values(block.inputs).forEach((input) => {
+        if (input && input.block) {
+          visitBlock(input.block);
+        }
+      });
+    }
+    if (block.next && block.next.block) {
+      visitBlock(block.next.block);
+    }
+  }
+
+  if (workspaceData && workspaceData.blocks && Array.isArray(workspaceData.blocks.blocks)) {
+    workspaceData.blocks.blocks.forEach(visitBlock);
+  } else if (workspaceData && workspaceData.blocks) {
+    visitBlock(workspaceData.blocks);
+  }
+
+  return labels;
+}
+
+function refreshLabelDropdowns(workspace) {
+  if (!workspace || typeof workspace.getAllBlocks !== 'function') return;
+  const blocks = workspace.getAllBlocks();
+  blocks.forEach((block) => {
+    if (typeof block.getLabelOptions !== 'function') return;
+    const field = block.getField && block.getField('LABEL');
+    if (!field) return;
+    const current = field.getValue();
+    field.menuGenerator_ = block.getLabelOptions.bind(block);
+    if (current && current !== 'CREATE_NEW') {
+      field.setValue(current);
+    } else if (Array.isArray(window.customLabels) && window.customLabels.length > 0) {
+      field.setValue(window.customLabels[0]);
+    }
+  });
 }
 
 // 新しいワークスペース作成
@@ -196,6 +291,7 @@ function newWorkspace() {
     window.vasmWorkspace.clear();
     currentFilePath = null;
     clearOutputMessages(); // 出力メッセージもクリア
+    setWorkspaceDirty(false);
     addOutputMessage('新しいワークスペースが作成されました');
     console.log('[INFO] 新しいワークスペースが作成されました');
   }
@@ -264,6 +360,7 @@ function initializeEventListeners() {
     });
   }
 
+
   eventListenersInitialized = true;
 }
 
@@ -307,6 +404,7 @@ function initializeApp() {
     // Blocklyワークスペースを初期化
     window.vasmWorkspace = initializeWorkspace();
     console.log('[INFO] Visual Assembler initialized successfully');
+    setWorkspaceDirty(false);
     // レジスタ初期表示（必要なら自動取得も可能だが、明示ボタン優先）
   }, 50);
   
