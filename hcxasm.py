@@ -17,49 +17,62 @@ HCX アセンブラ - .asmファイルをアセンブルして機械語コード
 import argparse
 import sys
 import os
+from typing import Optional, Sequence
 from pathlib import Path
+
+sys.path.append(os.path.join(os.path.dirname(__file__), './py'))
+
 import py.assembler as assembler
-import py.dictionaly as dictionaly
 
 
 def parse_arguments():
     """コマンドライン引数の解析"""
     parser = argparse.ArgumentParser(
-        description='HCx(HC4/8) series Assembler',
+        description='HCx(HC4/4e/8) series Assembler',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-出力形式:
-    binary  : バイナリファイル (.bin)
-    hex     : Intel HEXファイル (.hex)  
-    text    : テキストファイル (.txt) - 16進数表記
+Output Formats:
+    binary     : Binary file (.bin)
+    ihex       : Intel HEX file (.hex)
+    hex, vhex  : Verilog HEX file (.hex)
+    list, text : List file with source code correspondence (.lst, .txt)
 
-例:
+Examples:
     python hcxasm.py program.asm
     python hcxasm.py program.asm -o output.bin
-    python hcxasm.py program.asm -a HC4E -f hex
-    python hcxasm.py program.asm -o program.hex -f hex -v
+    python hcxasm.py program.asm -a HC4E -f ihex
+    python hcxasm.py program.asm -o program.hex -f ihex -v
         """
     )
     
     parser.add_argument('input_file', 
-                        help='入力アセンブリファイル (.asm)')
+                        help='Input assembly file (.asm)')
     
     parser.add_argument('-o', '--output',
-                        help='出力ファイル名 (デフォルト: 入力ファイル名.bin)')
+                        help='Output file name (default: input file name with .bin extension)')
     
     parser.add_argument('-a', '--architecture',
                         choices=['HC4', 'HC4E'],
                         default='HC4',
-                        help='ターゲットアーキテクチャ (デフォルト: HC4)')
+                        help='Target architecture (default: HC4)')
     
     parser.add_argument('-f', '--format',
-                        choices=['binary', 'hex', 'ihex', 'vhex', 'text'],
+                        choices=['binary', 'hex', 'ihex', 'vhex', 'text', 'list'],
                         default='binary',
-                        help='出力形式 (デフォルト: binary)')
+                        help='Output format (default: binary)')
     
     parser.add_argument('-v', '--verbose',
                         action='store_true',
-                        help='詳細出力を有効にする')
+                        help='Enable verbose output messages')
+    
+    parser.add_argument('-q', '--quiet',
+                        action='store_true',
+                        help='Suppress output messages')
+    
+    parser.add_argument('-L', '--include-path',
+                        action='append',
+                        default=[],
+                        help='Additional include path for .INCLUDE directives')
     
     return parser.parse_args()
 
@@ -68,145 +81,41 @@ def read_asm_file(filename:str):
     """アセンブリファイルを読み込む"""
     try:
         with open(filename, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        return [line.rstrip('\n\r') for line in lines]
+            lines = f.read()
+        return lines.splitlines()
     except FileNotFoundError:
-        print(f"エラー: ファイル '{filename}' が見つかりません。", file=sys.stderr)
+        print(f"[Error]: File '{filename}' not found.", file=sys.stderr)
         sys.exit(1)
     except UnicodeDecodeError:
-        print(f"エラー: ファイル '{filename}' の文字エンコーディングが無効です。", file=sys.stderr)
+        print(f"[Error]: Invalid character encoding in file '{filename}'.", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"エラー: ファイル '{filename}' の読み込み中にエラーが発生しました: {e}", file=sys.stderr)
+        print(f"[Error]: An error occurred while reading the file '{filename}': {e}", file=sys.stderr)
         sys.exit(1)
 
-
-def assemble_file(lines: list[str], architecture: str, verbose: bool = False):
-    """ファイル全体をアセンブル"""
-    assembled_lines:list[dictionaly.ListObject] = []
-    errors:list[str] = []
-    warnings:list[str] = []
-    
-    if verbose:
-        print(f"アーキテクチャ: {architecture}")
-        print(f"アセンブル開始...")
-        print("-" * 50)
-    
-    # First pass: assemble all lines and collect labels
-    labels:dict[str, int] = {}  # label_name -> address
-    address = 0
-    
-    for line_num, line in enumerate(lines, 1):
-        if verbose:
-            print(f"行 {line_num:3d}: {line}")
-        
-        result = assembler.assembleline(line, line_num, architecture)
-        result.address = address  # Set the current address
-        assembled_lines.append(result)
-        
-        if result.error:
-            errors.append(f"行 {line_num}: {result.error}")
-            if verbose:
-                print(f"         エラー: {result.error}")
-        elif result.machinecode is not None:
-            if verbose:
-                print(f"         機械語: 0x{result.machinecode:02X} @ 0x{address:04X}")
-            address += 1  # Increment address for machine code instructions
-        else:
-            if verbose and line.strip():
-                print(f"         空行/コメント")
-        
-        # Collect labels
-        if result.label:
-            if result.label.name in labels:
-                errors.append(f"行 {line_num}: ラベル '{result.label.name}' が重複しています")
-            else:
-                labels[result.label.name] = address
-                result.label.address = address
-                if verbose:
-                    print(f"         ラベル: {result.label.name} = 0x{address:04X}")
-    
-    # Second pass: resolve label references
-    for result in assembled_lines:
-        # Check instruction that requires label resolution
-        if result.machinecode is not None and (result.source[0].upper() == 'LI' or result.source[0].upper() == 'LS'):
-            # Check if the second part is a label reference
-            part = result.source[1]  # Second part is the oprand
-            if part.startswith('#') and ':' in part:
-                # Parse label reference: #label:slice
-                try:
-                    ref_part = part[1:]  # Remove '#'
-                    label_name, slice_str = ref_part.split(':', 1)
-                    slice_index = int(slice_str)
-                    
-                    if label_name not in labels:
-                        errors.append(f"行 {result.linenum}: 未定義のラベル '{label_name}'")
-                        continue
-                    
-                    label_address = labels[label_name]
-                    
-                    # Extract the specified slice (nibble)
-                    if slice_index == 3:
-                        nibble = (label_address >> 12) & 0xF  # bits [15:12]
-                    elif slice_index == 2:
-                        nibble = (label_address >> 8) & 0xF   # bits [11:8]
-                    elif slice_index == 1:
-                        nibble = (label_address >> 4) & 0xF   # bits [7:4]
-                    elif slice_index == 0:
-                        nibble = label_address & 0xF          # bits [3:0]
-                    else:
-                        errors.append(f"行 {result.linenum}: 無効なスライス '{slice_index}' (0-3の範囲である必要があります)")
-                        continue
-                    
-                    # Update the machine code with the resolved address
-                    # Extract the opcode and replace the operand
-                    opcode = result.machinecode & 0xF0
-                    result.machinecode = opcode | nibble
-                    
-                    if verbose:
-                        print(f"         ラベル解決: {part} -> {label_name}[{slice_index}] = 0x{nibble:X}")
-                    
-                except (ValueError, IndexError) as e:
-                    errors.append(f"行 {result.linenum}: ラベル参照の解析エラー '{part}': {e}")
-    
-    if verbose:
-        print("-" * 50)
-    
-    return assembled_lines, errors, warnings
-
-
-def generate_machine_code(assembled_lines: list[dictionaly.ListObject]):
-    """機械語コードのバイト列を生成"""
-    machine_code: list[int] = []
-    for result in assembled_lines:
-        if result.machinecode is not None:
-            machine_code.append(result.machinecode)
-    return machine_code
-
-
-def write_binary_output(filename:str, machine_code:list[int]):
+def write_binary_output(filename:str, machine_code:list[tuple[int, int]]):
     """バイナリ形式で出力"""
     try:
         with open(filename, 'wb') as f:
-            f.write(bytes(machine_code))
+            f.write(bytes([byte for byte, _ in machine_code]))
         return True
     except Exception as e:
-        print(f"エラー: バイナリファイル '{filename}' の書き込み中にエラーが発生しました: {e}", file=sys.stderr)
+        print(f"[Error]: An error occurred while writing the binary file '{filename}': {e}", file=sys.stderr)
         return False
     
-def write_verilog_hex_output(filename:str, machine_code:list[int]):
+def write_verilog_hex_output(filename:str, machine_code:list[tuple[int, int]]):
     """verilogのHEX形式で出力"""
     try:
         with open(filename, 'w', encoding='utf-8') as f:
-            for i in machine_code:
+            for i, _ in machine_code:
                 f.write(f"{i:02X}\n")
         return True
     except Exception as e:
-        print(f"エラー: HEXファイル '{filename}' の書き込み中にエラーが発生しました: {e}", file=sys.stderr)
+        print(f"[Error]: An error occurred while writing the HEX file '{filename}': {e}", file=sys.stderr)
         return False
 
 
-def write_intel_hex_output(filename:str, machine_code:list[int]):
+def write_intel_hex_output(filename:str, machine_code:list[tuple[int, int]]):
     """Intel HEX形式で出力"""
     try:
         with open(filename, 'w', encoding='utf-8') as f:
@@ -218,13 +127,13 @@ def write_intel_hex_output(filename:str, machine_code:list[int]):
                 
                 # チェックサムの計算
                 checksum = data_len + (address >> 8) + (address & 0xFF)
-                for byte_val in chunk:
+                for byte_val, _ in chunk:
                     checksum += byte_val
                 checksum = (~checksum + 1) & 0xFF
                 
                 # Intel HEX行の生成
                 hex_line = f":{data_len:02X}{address:04X}00"
-                for byte_val in chunk:
+                for byte_val, _ in chunk:
                     hex_line += f"{byte_val:02X}"
                 hex_line += f"{checksum:02X}"
                 
@@ -235,44 +144,57 @@ def write_intel_hex_output(filename:str, machine_code:list[int]):
             f.write(":00000001FF\n")
         return True
     except Exception as e:
-        print(f"エラー: HEXファイル '{filename}' の書き込み中にエラーが発生しました: {e}", file=sys.stderr)
+        print(f"[Error]: An error occurred while writing the HEX file '{filename}': {e}", file=sys.stderr)
         return False
 
 
-def write_text_output(filename:str, machine_code:list[int], assembled_lines:list[dictionaly.ListObject]):
-    """テキスト形式で出力"""
+def write_list_output(filename:str, lines:Sequence[tuple[str, int, str]], machine_code: Sequence[tuple[int, int]], ls:assembler.LinkState):
+    """
+    Write output in text format with machine code and source code correspondence.
+    Args:
+        filename (str): Output text file name.
+        lines (Sequence[tuple[str, int, str]]): List of tuple(line:str, lineno:int, unprocessed_line:str).
+        machine_code (Sequence[tuple[int, int]]): List of assembled lines with machine code and line numbers.
+    Returns:
+        bool: True if writing is successful, False otherwise.
+    """
     try:
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write("HCX アセンブル結果\n")
+            f.write("HCX Assemble Results\n")
             f.write("=" * 50 + "\n\n")
             
-            # 機械語とソースコードの対応表
-            f.write("アドレス  機械語  ソースコード\n")
+            f.write("Labels and Symbols:\n")
+            for label, address in ls.labels.items():
+                f.write(f"{label}: {address:04X}\n")
+            
+            # Machine code and source code correspondence table
+            f.write("line  address  machine code  source code\n")
             f.write("-" * 50 + "\n")
             
             address = 0
-            for result in assembled_lines:
-                if result.machinecode is not None:
-                    source_line = " ".join(result.source) if result.source else ""
-                    f.write(f"{address:04X}     {result.machinecode:02X}     {source_line}\n")
+            for result in lines:
+                source_line, line_num, unprocessed_line = result
+                if address < len(machine_code) and machine_code[address][1] == line_num:
+                    byte_val, _ = machine_code[address]
+                    f.write(f"{line_num:4d}  {address:04X}     {byte_val:02X}            {unprocessed_line}\n")
                     address += 1
-                elif result.source:  # コメントや空行でもソースがある場合
-                    source_line = " ".join(result.source)
-                    f.write(f"         --     {source_line}\n")
+                else:
+                    f.write(f"{line_num:4d}  {address:04X}                   {unprocessed_line}\n")
+
             
             f.write("\n" + "-" * 50 + "\n")
-            f.write(f"生成された機械語: {len(machine_code)} バイト\n\n")
+            f.write(f"Generated machine code: {len(machine_code)} bytes\n\n")
             
-            # 16進ダンプ
-            f.write("16進ダンプ:\n")
+            # Hex dump
+            f.write("Hex dump:\n")
             for i in range(0, len(machine_code), 16):
                 chunk = machine_code[i:i+16]
-                hex_str = " ".join(f"{byte_val:02X}" for byte_val in chunk)
+                hex_str = " ".join(f"{byte_val:02X}" for byte_val, _ in chunk)
                 f.write(f"{i:04X}: {hex_str:<47}\n")
                 
         return True
     except Exception as e:
-        print(f"エラー: テキストファイル '{filename}' の書き込み中にエラーが発生しました: {e}", file=sys.stderr)
+        print(f"[Error]: An error occurred while writing the list file '{filename}': {e}", file=sys.stderr)
         return False
 
 
@@ -289,75 +211,45 @@ def determine_output_filename(input_file:str, output_file:str, format_type:str):
     extensions = {
         'binary': '.bin',
         'hex': '.hex',
-        'text': '.txt'
+        'ihex': '.hex',
+        'vhex': '.hex',
+        'text': '.lst'
     }
     
     return base_name + extensions[format_type]
 
 
-def print_summary(assembled_lines: list[dictionaly.ListObject], errors: list[str], warnings: list[str], machine_code: list[int], verbose: bool = False):
-    """アセンブル結果のサマリーを表示"""
-    total_lines = len(assembled_lines)
-    code_lines = sum(1 for result in assembled_lines if result.machinecode is not None)
-    empty_lines = sum(1 for result in assembled_lines if result.machinecode is None and not result.source)
-    comment_lines = sum(1 for result in assembled_lines if result.machinecode is None and result.source)
+def main(args):
+    """Main function of hcx series assembler"""
     
-    print(f"\nアセンブル完了:")
-    print(f"  総行数:       {total_lines}")
-    print(f"  コード行:     {code_lines}")
-    print(f"  コメント行:   {comment_lines}")
-    print(f"  空行:         {empty_lines}")
-    print(f"  生成バイト数: {len(machine_code)}")
-    
-    if errors:
-        print(f"  エラー数:     {len(errors)}")
-    if warnings:
-        print(f"  警告数:       {len(warnings)}")
-    
-    if verbose and machine_code:
-        print(f"\n生成された機械語:")
-        for i in range(0, len(machine_code), 8):
-            chunk = machine_code[i:i+8]
-            hex_str = " ".join(f"{byte_val:02X}" for byte_val in chunk)
-            print(f"  {i:04X}: {hex_str}")
-
-
-def main():
-    """メイン関数"""
-    args = parse_arguments()
-    
-    # 入力ファイルの存在確認
+    # Check if input file exists
     if not os.path.exists(args.input_file):
-        print(f"エラー: 入力ファイル '{args.input_file}' が存在しません。", file=sys.stderr)
+        print(f"[Error] Input file '{args.input_file}' does not exist.", file=sys.stderr)
         sys.exit(1)
     
-    # 出力ファイル名の決定
+    # Determine output file name
     output_filename = determine_output_filename(args.input_file, args.output, args.format)
     
     if args.verbose:
-        print(f"HCX アセンブラ")
-        print(f"入力ファイル: {args.input_file}")
-        print(f"出力ファイル: {output_filename}")
-        print(f"出力形式:     {args.format}")
+        print(f"HCX Assembler")
+        print(f"Input file: {args.input_file}")
+        print(f"Output file: {output_filename}")
+        print(f"Output format: {args.format}")
         print()
     
-    # アセンブリファイルの読み込み
+    # Read assembly file
     lines = read_asm_file(args.input_file)
+    # Write output file
+    include_dir = Path(__file__).resolve().parent / 'include'
+    default_include_pathes = [os.path.dirname(args.input_file)] + args.include_path + [str(include_dir)]
+    processed_lines = assembler.preprocess(lines, False, default_include_pathes)
+    if args.verbose:
+        print(f"[Info] Preprocessed {len(processed_lines)} lines.")
+        print(processed_lines)
+    ls = assembler.LinkState()
     
-    # アセンブル実行
-    assembled_lines, errors, warnings = assemble_file(lines, args.architecture, args.verbose)
-    
-    # エラーチェック
-    if errors:
-        print("アセンブルエラーが発生しました:", file=sys.stderr)
-        for error in errors:
-            print(f"  {error}", file=sys.stderr)
-        sys.exit(1)
-    
-    # 機械語コード生成
-    machine_code = generate_machine_code(assembled_lines)
-    
-    # 出力ファイル書き込み
+    machine_code = assembler.assemble(tuple((pl[0], pl[1]) for pl in processed_lines), ls, args.architecture)
+
     success = False
     if args.format == 'binary':
         success = write_binary_output(output_filename, machine_code)
@@ -365,18 +257,21 @@ def main():
         success = write_intel_hex_output(output_filename, machine_code)
     elif args.format == 'hex' or args.format == 'vhex':
         success = write_verilog_hex_output(output_filename, machine_code)
-    elif args.format == 'text':
-        success = write_text_output(output_filename, machine_code, assembled_lines)
+    elif args.format == 'list' or args.format == 'text':
+        success = write_list_output(output_filename, processed_lines, machine_code, ls)
     
     if not success:
         sys.exit(1)
-    
-    # 結果サマリー表示
-    print_summary(assembled_lines, errors, warnings, machine_code, args.verbose)
-    
-    if args.verbose or not errors:
-        print(f"出力ファイル '{output_filename}' を生成しました。")
 
+    print(f"[Info] Assembled {machine_code[-1][1]} lines into {len(machine_code)} bytes.")
+    if args.verbose:
+        print(f"[Info] Architecture: {args.architecture}")
+        print(f"[Info] Output format: {args.format}")
+        print(f"[Info] Defined labels: ")
+        for label, address in ls.labels.items():
+            print(f"       {label}: {address:04X}")
+    print(f"[OK] Done. Output written to '{output_filename}'.")
 
 if __name__ == "__main__":
-    main()
+    args = parse_arguments()
+    main(args)
