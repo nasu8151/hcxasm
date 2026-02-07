@@ -33,9 +33,15 @@ li #label:1 ; `label:3` picks value from label[15:12], `label:2` picks from labe
 li #label:0 ; `label:1` picks from label[7:4], `label:0` picks from label[3:0].
 ```
 
-### Pseudo-instruction
+### Pseudo-instruction and directives
 
-Currently not implemented.
+```assembly
+.DEFINE FROM REPLACED   ; replace FROM into REPLACED in the assembly file.
+                        ; if defined within a macro, it can only be referenced from that macro.
+.MACRO NAME [ARG1 ...]  ; define macro named NAME. ARGs are not essential, if defined, it will decrear as .DEFINE
+.ENDM (or .ENDMACRO)    ; be sure to write this in the end of the macro.
+.INCLUDE (or .INC) FILE ; include FILE into assembly.
+```
 
 ## Command line options
 
@@ -50,9 +56,11 @@ Currently not implemented.
   * ```binary``` : binary file (Default)
   * ```hex``` and ```vhex``` : hexadecimal file format for verilog simulation.
   * ```ihex``` : intel hex
-  * ```text``` : list file
+  * ```text``` and ```list``` : list file
 * ```-v```, ```--verbose``` : 
   * Enable the verbose output
+* ```-L```, ```--include-path``` : 
+  * Additional include path for .INCLUDE directives
 
 ## ビジュアルアセンブラ（Visual Assembler, vasm）
 
