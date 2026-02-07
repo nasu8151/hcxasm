@@ -4,6 +4,17 @@ from typing import Sequence
 import testfuncs
 from enum import Enum, auto
 
+DIRECTIVES = {
+    ".DEF"     : 1,
+    ".DEFINE"  : 1,
+    ".MACRO"   : 2,
+    ".ENDMACRO": 3,
+    ".ENDM"    : 3,
+    ".INCLUDE" : 4,
+    ".INC"     : 4,
+    ".EQU"     : 101,
+}
+
 class insttype(Enum):
     INHERENT = auto()
     REGISTER = auto()
@@ -132,13 +143,7 @@ def preprocess(lines:Sequence[str], defs:Optional[dict[str, str]], in_macro:bool
     Input: list of lines (str)
     Output: list of tuples (line:str, lineno:int, unprocessed_line:str)
     """
-    DIRECTIVES = {
-        ".DEF"     : 1,
-        ".DEFINE"  : 1,
-        ".MACRO"   : 2,
-        ".ENDMACRO": 3,
-        ".ENDM"    : 3,
-    }
+    global DIRECTIVES
     defines: dict[str, str] = defs if defs is not None else {}
     macros: dict[str, tuple[list[str], list[str]]] = {}
     processed: list[tuple[str, int, str]] = []
@@ -189,6 +194,7 @@ def preprocess(lines:Sequence[str], defs:Optional[dict[str, str]], in_macro:bool
             macro_name = tok[0].upper()
             macro_args = tok[1:] if len(tok) > 1 else []
             macro_lines, params = macros[macro_name]
+            processed.append(("", lineno, unprocessed_line + " ; [MACRO]"))
             if len(macro_args) != len(params):
                 raise ValueError(f"[Error] Macro {macro_name} expects {len(params)} arguments, got {len(macro_args)} (line {lineno})")
             param_map = dict(zip(params, macro_args))
