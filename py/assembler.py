@@ -3,6 +3,7 @@ from typing import Optional
 from typing import Sequence
 import testfuncs
 from enum import Enum, auto
+from pathlib import Path
 
 DIRECTIVES = {
     ".DEF"     : 1,
@@ -46,6 +47,53 @@ class LinkState:
         if addr is not None:
             return (addr >> (int(sliced[1]) * 4)) & 0x0F
         return None
+
+class Defines:
+    def __init__(self, initial_defs:Optional[dict[str, str]]=None):
+        self.defines: list[dict[str, str]] = [{}]
+        if initial_defs is not None:
+            self.defines[0] = initial_defs
+        self.level = 0
+    
+    def add_def(self, key:str, value:str):
+        if key in self.defines[self.level]:
+            raise ValueError(f"[Error] Duplicate define: {key}")
+        self.defines[self.level][key] = value
+    
+    def get_def(self, key:str) -> Optional[str]:
+        for level in reversed(range(self.level + 1)):
+            if key in self.defines[level]:
+                return self.defines[level][key]
+        return None
+    
+    def new_scope(self):
+        self.level += 1
+        if len(self.defines) <= self.level:
+            self.defines.append({})
+    
+    def end_scope(self):
+        if self.level == 0:
+            raise ValueError("[Error] No scope to end.")
+        self.defines.pop()
+        self.level -= 1
+
+    def items(self):
+        result = {}
+        for level in reversed(range(self.level + 1)):
+            result.update(self.defines[level])
+        return result.items()
+
+class Macros:
+    def __init__(self, initial_macros:Optional[dict[str, tuple[list[str], list[str]]]]=None):
+        self.macros: dict[str, tuple[list[str], list[str]]] = initial_macros if initial_macros is not None else {}
+    
+    def add_macro(self, name:str, lines:list[str], params:list[str]):
+        if name in self.macros:
+            raise ValueError(f"[Error] Duplicate macro definition: {name}")
+        self.macros[name] = (lines, params)
+    
+    def get_macro(self, name:str) -> Optional[tuple[list[str], list[str]]]:
+        return self.macros.get(name, None)
 
 def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tuple[int, int]]:
     """
@@ -113,7 +161,12 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
                     ls.add_unresolved(label[0], len(machine_code))
                     machine_code.append((opcode, lineno))
                     continue
-                oprand = int(tok[1][1:], 0)
+                try:
+                    print(tok[1])
+                    print(re.findall(r"#((0x|0b)?[0-9a-fA-F]+)", tok[1])[0][0])
+                    oprand = int(re.findall(r"#((0x|0b)?[0-9a-fA-F]+)", tok[1])[0][0], 0)
+                except ValueError:
+                    raise ValueError(f"Invalid immediate value : {tok[1]} in line {lineno}")
                 if oprand > 15:
                     raise ValueError(f"Too big immediate value : {oprand} in line {lineno}")
                 if oprand < 0:
@@ -137,15 +190,13 @@ def assemble(code:Sequence[tuple[str, int]], ls:LinkState, arch:str) -> list[tup
         machine_code[addr] = (machine_code[addr][0] + value, machine_code[addr][1])
     return machine_code
 
-def preprocess(lines:Sequence[str], defs:Optional[dict[str, str]], in_macro:bool) -> list[tuple[str, int, str]]:
+def preprocess(lines:Sequence[str], in_macro:bool, default_include_pathes:list[str], defines:Defines=Defines(), macros:Macros=Macros()) -> list[tuple[str, int, str]]:
     """
     preprocessor for assembly code: remove comments and empty lines
     Input: list of lines (str)
     Output: list of tuples (line:str, lineno:int, unprocessed_line:str)
     """
     global DIRECTIVES
-    defines: dict[str, str] = defs if defs is not None else {}
-    macros: dict[str, tuple[list[str], list[str]]] = {}
     processed: list[tuple[str, int, str]] = []
     lineno = 0
     while lineno < len(lines):
@@ -159,7 +210,7 @@ def preprocess(lines:Sequence[str], defs:Optional[dict[str, str]], in_macro:bool
         if directive == 1:  # .DEF or .DEFINE
             if len(tok) < 3:
                 raise ValueError(f"[Error] Invalid .DEF or .DEFINE directive at line {lineno}")
-            defines[tok[1]] = " ".join(tok[2:])
+            defines.add_def(tok[1], " ".join(tok[2:]))
             processed.append(("", lineno, unprocessed_line))
             continue
         elif directive == 2:  # .MACRO
@@ -179,27 +230,50 @@ def preprocess(lines:Sequence[str], defs:Optional[dict[str, str]], in_macro:bool
                     break
             else:
                 raise ValueError(f"[Error] Missing .ENDMACRO directive for macro {macro_name}")
-            macros[macro_name] = (macro_lines, params)
+            macros.add_macro(macro_name, macro_lines, params)
             lineno = macro_lineno
             continue
         elif directive == 3 and in_macro:  # .ENDMACRO or .ENDM
             return processed
+        elif directive == 4:  # .INCLUDE or .INC
+            if len(tok) < 2:
+                raise ValueError(f"[Error] Invalid .INCLUDE or .INC directive at line {lineno}")
+            include_filename = tok[1].strip('"')
+            for path in default_include_pathes:
+                potential_path = Path(path) / include_filename
+                if potential_path.exists():
+                    include_filename = str(potential_path)
+                    break
+            try:
+                with open(include_filename, 'r', encoding='utf-8') as f:
+                    include_lines = f.readlines()
+                res = preprocess(include_lines, in_macro, default_include_pathes, defines, macros)
+                processed.extend(res)
+            except FileNotFoundError:
+                raise FileNotFoundError(f"[Error] Included file not found: {include_filename} (line {lineno})")
+            continue
         
         line = line.replace("\t", " ").strip()
         for def_key, def_value in defines.items():
             line = re.sub(rf"\b{re.escape(def_key)}\b", def_value, line)
         # replace defines
 
-        if tok and tok[0].upper() in macros:
+        if tok and macros.get_macro(tok[0].upper()) is not None and not in_macro:
             macro_name = tok[0].upper()
             macro_args = tok[1:] if len(tok) > 1 else []
-            macro_lines, params = macros[macro_name]
+            macro_def = macros.get_macro(macro_name)
+            if macro_def is None:
+                raise KeyError(f"[Error] Macro {macro_name} not found (line {lineno})")
+            macro_lines, params = macro_def
             processed.append(("", lineno, unprocessed_line + " ; [MACRO]"))
             if len(macro_args) != len(params):
                 raise ValueError(f"[Error] Macro {macro_name} expects {len(params)} arguments, got {len(macro_args)} (line {lineno})")
-            param_map = dict(zip(params, macro_args))
-            res = preprocess(macro_lines, param_map, True)
+            defines.new_scope()
+            for p, a in zip(params, macro_args):
+                defines.add_def(p, a)
+            res = preprocess(macro_lines, True, default_include_pathes, defines, macros)
             processed.extend(res)
+            defines.end_scope()
             continue
 
 
@@ -218,8 +292,8 @@ def self_test():
         LD r0      ; Load to register 0
         LI #0      ; Load immediate 0
         JP         ; Jump
-        """.splitlines(), None, False
-    )), LinkState(), "HC4")
+        """.splitlines(), False, [])
+    ), LinkState(), "HC4")
     testfuncs.expect([(0x41, 3), (0x52, 4), (0x63, 5), (0x74, 6)], assemble, tuple((pl[0], pl[1]) for pl in preprocess(
         """.DEF REG1 r1
         .DEF REG2 r2
@@ -227,8 +301,8 @@ def self_test():
         OR REG2
         AN r3
         SA r4
-        """.splitlines(), None, False
-    )), LinkState(), "HC4")
+        """.splitlines(), False, [])
+    ), LinkState(), "HC4")
     processed = tuple((pl[0], pl[1]) for pl in preprocess(
         """.MACRO ADD_REGS REG_A REG_B
         LD REG_A
@@ -237,8 +311,8 @@ def self_test():
         .ENDM
         ADD_REGS r1 r2
         JP
-        """.splitlines(), None, False
-    ))
+        """.splitlines(), False, [])
+    )
     print(processed)
     testfuncs.expect([(0x91, 1), (0x92, 2), (0x31, 3), (0xE0, 7)], assemble, processed, LinkState(), "HC4")
     testfuncs.expect_raises(KeyError, assemble, [("XX r1", 1)], LinkState(), "HC4")

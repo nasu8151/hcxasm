@@ -69,6 +69,11 @@ Examples:
                         action='store_true',
                         help='Suppress output messages')
     
+    parser.add_argument('-L', '--include-path',
+                        action='append',
+                        default=[],
+                        help='Additional include path for .INCLUDE directives')
+    
     return parser.parse_args()
 
 
@@ -215,7 +220,7 @@ def determine_output_filename(input_file:str, output_file:str, format_type:str):
 
 
 def main(args):
-    """Main function"""
+    """Main function of hcx series assembler"""
     
     # Check if input file exists
     if not os.path.exists(args.input_file):
@@ -235,7 +240,9 @@ def main(args):
     # Read assembly file
     lines = read_asm_file(args.input_file)
     # Write output file
-    processed_lines = assembler.preprocess(lines, None, False)
+    include_dir = Path(__file__).resolve().parent / 'include'
+    default_include_pathes = [os.path.dirname(args.input_file)] + args.include_path + [str(include_dir)]
+    processed_lines = assembler.preprocess(lines, False, default_include_pathes)
     if args.verbose:
         print(f"[Info] Preprocessed {len(processed_lines)} lines.")
         print(processed_lines)
