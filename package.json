@@ -34,12 +34,14 @@
       "assets/**/*",
       "hcxasm.py",
       "load4e.py",
-      "py/**/*"
+      "py/**/*",
+      "include/**/*"
     ],
     "asarUnpack": [
       "hcxasm.py",
       "load4e.py",
-      "py/**/*"
+      "py/**/*",
+      "include/**/*"
     ],
     "win": {
       "target": [

@@ -22,7 +22,14 @@
       <button id="saveButton" onclick="saveAssemblyFile()">アセンブリファイルを保存</button>
     </div>
     <!-- Blocklyエディタを置く場所 -->
-    <div id="blocklyDiv"></div>
+    <div id="blocklyContainer">
+      <div id="toolboxSidebar">
+        <button class="toolbox-cat active" data-anchor="label">ラベル</button>
+        <button class="toolbox-cat" data-anchor="command">普通の命令</button>
+        <button class="toolbox-cat" data-anchor="macro">マクロ</button>
+      </div>
+      <div id="blocklyDiv"></div>
+    </div>
     <!-- 出力結果表示エリア（タブ構造） -->
     <div id="outputContainer">
       <div class="tab-header">

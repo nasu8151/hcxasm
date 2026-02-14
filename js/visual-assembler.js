@@ -613,6 +613,137 @@ function makeLabelDefinitionBlock(type, label, color) {
   };
 }
 
+function makeMacroblock_regregreg(type, label, color) {
+  REG = [
+    ["R0", "R0"],
+    ["R1", "R1"],
+    ["R2", "R2"],
+    ["R3", "R3"],
+    ["R4", "R4"],
+    ["R5", "R5"],
+    ["R6", "R6"],
+    ["R7", "R7"],
+    ["R8", "R8"],
+    ["R9", "R9"],
+    ["R10", "R10"],
+    ["R11", "R11"],
+    ["R12", "R12"],
+    ["R13", "R13"],
+    ["R14", "R14"],
+    ["R15", "R15"]
+  ];
+  Blockly.Blocks[type] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(label)
+        .appendField(new Blockly.FieldDropdown(REG), "DST")
+        .appendField(new Blockly.FieldDropdown(REG), "SRC1")
+        .appendField(new Blockly.FieldDropdown(REG), "SRC2");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour(color);
+    }
+  };
+};
+
+function makeMacroblock_regregimm(type, label, color) {
+  REG = [
+    ["R0", "R0"],
+    ["R1", "R1"],
+    ["R2", "R2"],
+    ["R3", "R3"],
+    ["R4", "R4"],
+    ["R5", "R5"],
+    ["R6", "R6"],
+    ["R7", "R7"],
+    ["R8", "R8"],
+    ["R9", "R9"],
+    ["R10", "R10"],
+    ["R11", "R11"],
+    ["R12", "R12"],
+    ["R13", "R13"],
+    ["R14", "R14"],
+    ["R15", "R15"]
+  ];
+  Blockly.Blocks[type] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(label)
+        .appendField(new Blockly.FieldDropdown(REG), "DST")
+        .appendField(new Blockly.FieldDropdown(REG), "SRC")
+        .appendField(new Blockly.FieldNumber(0, 0, 255), "IMM");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour(color);
+
+    }
+  };
+};
+
+function makeMacroblock_regreg(type, label, color) {
+    REG = [
+    ["R0", "R0"],
+    ["R1", "R1"],
+    ["R2", "R2"],
+    ["R3", "R3"],
+    ["R4", "R4"],
+    ["R5", "R5"],
+    ["R6", "R6"],
+    ["R7", "R7"],
+    ["R8", "R8"],
+    ["R9", "R9"],
+    ["R10", "R10"],
+    ["R11", "R11"],
+    ["R12", "R12"],
+    ["R13", "R13"],
+    ["R14", "R14"],
+    ["R15", "R15"]
+  ];
+  Blockly.Blocks[type] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(label)
+        .appendField(new Blockly.FieldDropdown(REG), "DST")
+        .appendField(new Blockly.FieldDropdown(REG), "SRC");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour(color);
+    }
+  };
+};
+
+function makeMacroblock_regimm(type, label, color) {
+    REG = [
+    ["R0", "R0"],
+    ["R1", "R1"],
+    ["R2", "R2"],
+    ["R3", "R3"],
+    ["R4", "R4"],
+    ["R5", "R5"],
+    ["R6", "R6"],
+    ["R7", "R7"],
+    ["R8", "R8"],
+    ["R9", "R9"],
+    ["R10", "R10"],
+    ["R11", "R11"],
+    ["R12", "R12"],
+    ["R13", "R13"],
+    ["R14", "R14"],
+    ["R15", "R15"]
+  ];
+  Blockly.Blocks[type] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField(label)
+        .appendField(new Blockly.FieldDropdown(REG), "DST")
+        .appendField(new Blockly.FieldNumber(0, 0, 255), "IMM");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour(color);
+    }
+  };
+};
+
 // --- ブロック初期化関数 ---
 function initializeBlocks() {
   // アーキテクチャモード（HC4 / HC4E）
@@ -664,6 +795,12 @@ function initializeBlocks() {
   
   // ハットブロック版ラベル定義を作成
   makeLabelHatBlock('label_hat', 'プログラム開始', 120);
+
+  // マクロ類
+  makeMacroblock_regregreg('m_add', 'ADD', 200);
+  makeMacroblock_regregimm('m_addi', 'ADDI', 205);
+  makeMacroblock_regreg('m_mov', 'MOV', 210);
+  makeMacroblock_regimm('m_movi', 'MOVI', 215);
 }
 
 // --- コード生成ルール（独自アセンブリ出力） ---
@@ -731,9 +868,7 @@ function initializeCodeGenerator() {
   Blockly.Assembly.forBlock['goto'] = function(block) {
     var label = block.getFieldValue('LABEL');
     if (window.architecture === 'HC4E') {
-      return  'LI #' + label + ':1\n' +
-              'LI #' + label + ':0\n' +
-              'JP\n';
+      return  'GOTO ' + label + '\n';
     } else {
       return  'LI #' + label + ':2\n' +
               'LI #' + label + ':1\n' +
@@ -747,9 +882,7 @@ function initializeCodeGenerator() {
     var label = block.getFieldValue('LABEL');
     var flag = block.getFieldValue('FLAG');
     if (window.architecture === 'HC4E') {
-      return  'LI #' + label + ':1\n' +
-              'LI #' + label + ':0\n' +
-              'JP ' + flag + '\n';
+      return  'GOTO_IF ' + flag + ' ' + label + '\n';
     } else {
       return  'LI #' + label + ':2\n' +
               'LI #' + label + ':1\n' +
@@ -769,6 +902,32 @@ function initializeCodeGenerator() {
     var label = block.getFieldValue('LABEL');
     return label + ':\n';
   };
+
+  Blockly.Assembly.forBlock['m_add'] = function(block) {
+    var dst = block.getFieldValue('DST');
+    var src1 = block.getFieldValue('SRC1');
+    var src2 = block.getFieldValue('SRC2');
+    return 'ADD ' + dst + ' ' + src1 + ' ' + src2 + '\n';
+  }
+
+  Blockly.Assembly.forBlock['m_addi'] = function(block) {
+    var dst = block.getFieldValue('DST');
+    var src = block.getFieldValue('SRC');
+    var imm = block.getFieldValue('IMM');
+    return 'ADDI ' + dst + ' ' + src + ' #' + imm + '\n';
+  }
+
+  Blockly.Assembly.forBlock['m_mov'] = function(block) {
+    var dst = block.getFieldValue('DST');
+    var src = block.getFieldValue('SRC');
+    return 'MOV ' + dst + ' ' + src + '\n';
+  }
+
+  Blockly.Assembly.forBlock['m_movi'] = function(block) {
+    var dst = block.getFieldValue('DST');
+    var imm = block.getFieldValue('IMM');
+    return 'MOVI ' + dst + ' #' + imm + '\n';
+  }
   
   Blockly.Assembly.init = function(workspace) {};
   Blockly.Assembly.finish = function(code) { return code; };
@@ -784,9 +943,10 @@ function initializeCodeGenerator() {
 // --- ツールボックス定義 ---
 function getToolboxConfig() {
   const common = [
+    { "kind": "label", "text": "ラベル" },
     { "kind": "block", "type": "label_hat" },
     { "kind": "block", "type": "label_def" },
-    { "kind": "sep", "gap": "12" }
+    { "kind": "sep", "gap": "14" }
   ];
 
   let commands;
@@ -819,13 +979,24 @@ function getToolboxConfig() {
   }
 
   const extra = [
+    { "kind": "label", "text": "マクロ" },
     { "kind": "block", "type": "goto" },
-    { "kind": "block", "type": "goto_if" }
+    { "kind": "block", "type": "goto_if" },
+    { "kind": "block", "type": "m_add" },
+    { "kind": "block", "type": "m_addi" },
+    { "kind": "block", "type": "m_mov" },
+    { "kind": "block", "type": "m_movi" }
   ];
 
   return {
     "kind": "flyoutToolbox",
-    "contents": [...common, ...commands, ...extra]
+    "contents": [
+      ...common,
+      { "kind": "label", "text": "普通の命令" },
+      ...commands,
+      { "kind": "sep", "gap": "14" },
+      ...extra
+    ]
   };
 }
 
@@ -867,6 +1038,7 @@ function initializeWorkspace() {
   });
 
   registerDuplicateChainMenu(workspace);
+  registerToolboxSidebar(workspace);
 
   // ハットブロックから開始されるコードを生成する関数
   function generateCodeFromHatBlocks(workspace) {
@@ -895,7 +1067,13 @@ function initializeWorkspace() {
         }
       }
     }
-    
+
+    if (code.trim() !== '') {
+      if (!code.startsWith('.include vasm.inc')) {
+        code = '.include vasm.inc\n' + code;
+      }
+    }
+
     return code;
   }
 
@@ -946,6 +1124,50 @@ function initializeWorkspace() {
   setTimeout(updateCode, 100);
   
   return workspace;
+}
+
+function registerToolboxSidebar(workspace) {
+  const sidebar = document.getElementById('toolboxSidebar');
+  if (!sidebar || !workspace) return;
+
+  const buttons = sidebar.querySelectorAll('.toolbox-cat');
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      buttons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const anchorType = btn.getAttribute('data-anchor');
+      scrollFlyoutToBlockType(workspace, resolveFlyoutAnchorType(anchorType));
+    });
+  });
+}
+
+function resolveFlyoutAnchorType(anchorKey) {
+  if (anchorKey === 'label') return 'label_hat';
+  if (anchorKey === 'macro') return 'goto';
+  if (anchorKey === 'command') {
+    return (window.architecture === 'HC4E') ? 'ad' : 'sm';
+  }
+  return anchorKey;
+}
+
+function scrollFlyoutToBlockType(workspace, blockType) {
+  if (!workspace || !blockType) return;
+  const flyout = workspace.getFlyout && workspace.getFlyout();
+  if (!flyout || !flyout.getWorkspace) return;
+  const flyoutWorkspace = flyout.getWorkspace();
+  const blocks = flyoutWorkspace.getTopBlocks(true);
+  const target = blocks.find((block) => block.type === blockType);
+  if (!target) return;
+
+  const targetPos = target.getRelativeToSurfaceXY();
+  const y = Math.max(0, targetPos.y - 10);
+  if (flyoutWorkspace.scrollbar && typeof flyoutWorkspace.scrollbar.setY === 'function') {
+    flyoutWorkspace.scrollbar.setY(y);
+  } else if (typeof flyout.scrollTo === 'function') {
+    flyout.scrollTo(0, y);
+  } else if (typeof flyout.setScrollY === 'function') {
+    flyout.setScrollY(y);
+  }
 }
 
 function registerDuplicateChainMenu(workspace) {
