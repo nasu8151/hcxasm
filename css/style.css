@@ -32,8 +32,7 @@ div[style*="margin-bottom"] {
 #blocklyContainer {
   flex: 1;
   width: 100%;
-  min-height: 400px;
-  border-bottom: 2px solid #ccc;
+  min-height: 100px;
   display: flex;
   align-items: stretch;
 }
@@ -41,11 +40,39 @@ div[style*="margin-bottom"] {
 #toolboxSidebar {
   width: 130px;
   background: #f0f0f0;
-  border-right: 1px solid #ccc;
   display: flex;
   flex-direction: column;
   padding: 8px 6px;
   gap: 6px;
+  box-sizing: border-box;
+}
+
+.vertical-resizer {
+  width: 6px;
+  background-color: #dcdcdc;
+  cursor: col-resize;
+  flex-shrink: 0;
+  z-index: 10;
+  border-left: 1px solid #ccc;
+  border-right: 1px solid #ccc;
+}
+
+.vertical-resizer:hover, .vertical-resizer:active {
+  background-color: #bbb;
+}
+
+.horizontal-resizer {
+  height: 6px;
+  background-color: #dcdcdc;
+  cursor: row-resize;
+  flex-shrink: 0;
+  z-index: 10;
+  border-top: 1px solid #ccc;
+  border-bottom: 1px solid #ccc;
+}
+
+.horizontal-resizer:hover, .horizontal-resizer:active {
+  background-color: #bbb;
 }
 
 .toolbox-cat {
@@ -72,14 +99,16 @@ div[style*="margin-bottom"] {
 #blocklyDiv {
   flex: 1;
   width: 100%;
-  min-height: 400px;
+  min-height: 100px;
+  position: relative;
 }
 
 /* 出力コンテナ */
 #outputContainer {
   flex-shrink: 0;
   height: 200px;
-  border: 1px solid #ccc;
+  min-height: 50px;
+  border-bottom: 1px solid #ccc;
   display: flex;
   flex-direction: column;
 }

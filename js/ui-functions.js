@@ -286,15 +286,31 @@ function newWorkspace() {
     alert('ワークスペースが初期化されていません。');
     return;
   }
-  
-  if (confirm('現在の作業内容が失われます。新しいワークスペースを作成しますか？')) {
-    window.vasmWorkspace.clear();
-    currentFilePath = null;
-    clearOutputMessages(); // 出力メッセージもクリア
-    setWorkspaceDirty(false);
-    addOutputMessage('新しいワークスペースが作成されました');
-    console.log('[INFO] 新しいワークスペースが作成されました');
+
+  // ネイティブ confirm() を使うと OS レベルのキーボードフォーカスが失われ、
+  // その後 FieldNumber に数値入力できなくなるため、カスタム HTML ダイアログを使用する。
+  const dlg = document.getElementById('newWorkspaceDialog');
+  if (dlg) {
+    dlg.style.display = 'block';
   }
+}
+
+function confirmNewWorkspace() {
+  const dlg = document.getElementById('newWorkspaceDialog');
+  if (dlg) dlg.style.display = 'none';
+
+  if (!window.vasmWorkspace) return;
+  window.vasmWorkspace.clear();
+  currentFilePath = null;
+  clearOutputMessages();
+  setWorkspaceDirty(false);
+  addOutputMessage('新しいワークスペースが作成されました');
+  console.log('[INFO] 新しいワークスペースが作成されました');
+}
+
+function cancelNewWorkspace() {
+  const dlg = document.getElementById('newWorkspaceDialog');
+  if (dlg) dlg.style.display = 'none';
 }
 
 // ラベル作成ダイアログの制御
@@ -415,6 +431,7 @@ function initializeApp() {
     console.log('[INFO] Visual Assembler initialized successfully');
     setWorkspaceDirty(false);
     // レジスタ初期表示（必要なら自動取得も可能だが、明示ボタン優先）
+    initFlyoutResizer(window.vasmWorkspace);
   }, 50);
   
   // イベントリスナーを初期化
@@ -424,7 +441,155 @@ function initializeApp() {
 // DOMContentLoadedイベントでアプリケーションを初期化
 document.addEventListener('DOMContentLoaded', function() {
   initializeApp();
+  initSplitters();
 });
+
+// スプリッター初期化（ツールボックス、出力タブのリサイズ）
+function initSplitters() {
+  const outputContainer = document.getElementById('outputContainer');
+  const outputSplitter = document.getElementById('outputSplitter');
+  let isResizingOutput = false;
+
+  if (outputSplitter && outputContainer) {
+    outputSplitter.addEventListener('mousedown', (e) => {
+      isResizingOutput = true;
+      document.body.style.cursor = 'row-resize';
+      e.preventDefault();
+    });
+  }
+
+  window.addEventListener('mousemove', (e) => {
+    if (isResizingOutput) {
+      // bottom height = window.innerHeight - e.clientY
+      const newHeight = Math.max(50, Math.min(window.innerHeight - e.clientY, window.innerHeight - 100));
+      outputContainer.style.height = newHeight + 'px';
+      if (window.vasmWorkspace) {
+        Blockly.svgResize(window.vasmWorkspace);
+      }
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isResizingOutput) {
+      isResizingOutput = false;
+      document.body.style.cursor = 'default';
+      if (window.vasmWorkspace) {
+        Blockly.svgResize(window.vasmWorkspace);
+      }
+    }
+  });
+}
+
+function initFlyoutResizer(workspace) {
+  if (!workspace) return;
+  const flyout = workspace.getFlyout();
+  if (!flyout) return;
+
+  const blocklyDiv = document.getElementById('blocklyDiv');
+  if (!blocklyDiv) return;
+
+  // すでに存在していれば削除
+  let resizer = document.getElementById('flyoutSplitter');
+  if (resizer) resizer.remove();
+
+  resizer = document.createElement('div');
+  resizer.id = 'flyoutSplitter';
+  resizer.className = 'vertical-resizer';
+  resizer.style.position = 'absolute';
+  resizer.style.top = '0';
+  resizer.style.bottom = '0';
+  resizer.style.zIndex = '50';
+  
+  blocklyDiv.appendChild(resizer);
+
+  let customWidth = null;
+
+  // Flyoutの幅を返すメソッドをフック
+  if (typeof flyout.getWidth === 'function') {
+    const originalGetWidth = flyout.getWidth.bind(flyout);
+    flyout.getWidth = function() {
+      if (customWidth !== null) {
+        return customWidth;
+      }
+      return originalGetWidth();
+    };
+  }
+
+  const originalReflow = flyout.reflowInternal_ ? flyout.reflowInternal_.bind(flyout) : (flyout.reflow ? flyout.reflow.bind(flyout) : null);
+  if (originalReflow) {
+    const hook = function() {
+      originalReflow();
+      if (customWidth !== null) {
+        flyout.width_ = customWidth;
+        if (flyout.svgBackground_) flyout.svgBackground_.setAttribute('width', customWidth);
+        if (flyout.svgGroup_) flyout.svgGroup_.setAttribute('width', customWidth);
+      }
+    };
+    if (flyout.reflowInternal_) {
+      flyout.reflowInternal_ = hook;
+    } else {
+      flyout.reflow = hook;
+    }
+  }
+
+  function updateResizerPosition() {
+    if (!resizer.parentNode) return;
+    const actualWidth = typeof flyout.getWidth === 'function' ? flyout.getWidth() : (flyout.width_ || 0);
+    resizer.style.left = actualWidth + 'px';
+  }
+
+  workspace.addChangeListener(() => {
+    updateResizerPosition();
+  });
+
+  let isResizing = false;
+  resizer.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    document.body.style.cursor = 'col-resize';
+    e.preventDefault();
+  });
+
+  // ドラッグ中に選択が起きるのを防ぐ
+  window.addEventListener('selectstart', (e) => {
+    if (isResizing) {
+      e.preventDefault();
+    }
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const rect = blocklyDiv.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    
+    // 最低でも100px、最大でBlocklyDivの幅-50
+    const minWidth = 100;
+    customWidth = Math.max(minWidth, Math.min(offsetX, rect.width - 50));
+    
+    if (originalReflow) {
+      if (flyout.reflowInternal_) flyout.reflowInternal_();
+      else if (flyout.reflow) flyout.reflow();
+    }
+    Blockly.svgResize(workspace);
+    updateResizerPosition();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = 'default';
+      Blockly.svgResize(workspace);
+      updateResizerPosition();
+    }
+  });
+
+  setTimeout(() => {
+    if (originalReflow) {
+      if (flyout.reflowInternal_) flyout.reflowInternal_();
+      else if (flyout.reflow) flyout.reflow();
+    }
+    updateResizerPosition();
+  }, 150);
+}
 
 // デバイスへアップロード
 async function uploadToDevice() {

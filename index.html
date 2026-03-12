@@ -22,6 +22,9 @@
       </div>
       <div id="blocklyDiv"></div>
     </div>
+    
+    <div id="outputSplitter" class="horizontal-resizer"></div>
+    
     <!-- 出力結果表示エリア（タブ構造） -->
     <div id="outputContainer">
       <div class="tab-header">
@@ -43,6 +46,18 @@
             <span id="registerStatus" style="color:#666;"></span>
           </div>
           <div id="registerOutput">レジスタの内容がここに表示されます...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新規ワークスペース確認ダイアログ -->
+    <div id="newWorkspaceDialog" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 9999;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 5px; min-width: 300px;">
+        <h4>新しいワークスペース</h4>
+        <p>現在の作業内容が失われます。新しいワークスペースを作成しますか？</p>
+        <div style="text-align: right; margin-top: 15px;">
+          <button onclick="cancelNewWorkspace()" style="margin-right: 10px;">キャンセル</button>
+          <button onclick="confirmNewWorkspace()">OK</button>
         </div>
       </div>
     </div>
