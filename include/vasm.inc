@@ -35,3 +35,10 @@
     LI #label:0
     JP cond
 .ENDMACRO
+
+.MACRO HALT
+    LI #__halt:1
+    LI #__halt:0
+__halt:
+    JP
+.ENDMACRO

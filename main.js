@@ -35,34 +35,85 @@ function chooseSystemPython() {
   return null;
 }
 
-async function ensurePythonEnv() {
+function spawnAsync(cmd, args) {
+  return new Promise((resolve) => {
+    const proc = spawn(cmd, args, { windowsHide: true });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
+    proc.on('close', (code) => {
+      resolve({ status: code, stdout, stderr, error: code !== 0 ? new Error(`Exited with ${code}`) : null });
+    });
+    
+    proc.on('error', (err) => {
+      resolve({ status: -1, stdout, stderr, error: err });
+    });
+  });
+}
+
+async function ensurePythonEnv(splashWindow) {
+  const updateSplash = (msg, progress) => {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.webContents.send('progress', { message: msg, progress });
+    }
+  };
+
   try {
     const { venvRoot, pythonExe, pipExe } = getVenvPaths();
+    
+    updateSplash('Python環境を確認中...', 10);
+    
     // 既存チェック
     if (!fs.existsSync(pythonExe)) {
+      updateSplash('システムPythonを検索中...', 20);
       const sysPy = chooseSystemPython();
       if (!sysPy) {
         console.error('[ERROR] Python 3.x が見つかりません');
+        updateSplash('Python 3.x が見つかりません。起動を継続します。', 100);
+        await new Promise(r => setTimeout(r, 1500));
         return; // 起動は継続、エクスポート時に詳細エラーを返す
       }
-      // venv作成
-      const mk = spawnSync(sysPy, ['-m', 'venv', venvRoot], { windowsHide: true });
+      
+      updateSplash('仮想環境（venv）を作成中...（この処理には時間がかかります）', 40);
+      const mk = await spawnAsync(sysPy, ['-m', 'venv', venvRoot]);
       if (mk.status !== 0) {
-        console.error('[ERROR] venv作成に失敗:', mk.stderr?.toString() || '');
+        console.error('[ERROR] venv作成に失敗:', mk.stderr);
+        updateSplash('venvの作成に失敗しました。', 100);
+        await new Promise(r => setTimeout(r, 1500));
         return;
       }
     }
+    
     // pip確認・アップグレード
     if (fs.existsSync(pythonExe)) {
-      spawnSync(pythonExe, ['-m', 'pip', '--version'], { windowsHide: true });
-      spawnSync(pythonExe, ['-m', 'pip', 'install', '--upgrade', 'pip'], { windowsHide: true });
+      updateSplash('pipを確認中...', 60);
+      await spawnAsync(pythonExe, ['-m', 'pip', '--version']);
+      
+      updateSplash('pipをアップグレード中...', 70);
+      await spawnAsync(pythonExe, ['-m', 'pip', 'install', '--upgrade', 'pip']);
+      
       // 必要パッケージのインストール
       const requiredPackages = ['pyserial'];
-      for (const pkg of requiredPackages) {
-        spawnSync(pythonExe, ['-m', 'pip', 'install', pkg], { windowsHide: true });
+      for (let i = 0; i < requiredPackages.length; i++) {
+        const pkg = requiredPackages[i];
+        const progress = 70 + Math.floor(30 * ((i + 1) / requiredPackages.length));
+        updateSplash(`パッケージ '${pkg}' をインストール中...`, progress - 5);
+        await spawnAsync(pythonExe, ['-m', 'pip', 'install', pkg]);
+        updateSplash(`パッケージ '${pkg}' インストール完了`, progress);
       }
-
     }
+    
+    updateSplash('起動準備完了', 100);
+    await new Promise(r => setTimeout(r, 500)); // 少し待機して100%を見せる
   } catch (e) {
     console.error('[ERROR] ensurePythonEnv中に例外:', e);
   }
@@ -318,9 +369,45 @@ function createWindow() {
 
 // アプリが準備完了したときに実行
 app.whenReady().then(async () => {
-  // 起動時に仮想環境を確認・作成
-  await ensurePythonEnv();
+  // スプラッシュ画面の作成
+  const splashWindow = new BrowserWindow({
+    width: 450,
+    height: 350,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-splash.js')
+    }
+  });
+
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+
+  splashWindow.once('ready-to-show', () => {
+    splashWindow.show();
+  });
+
+  // 起動時に仮想環境を確認・作成（スプラッシュ画面へ進捗を渡す）
+  await ensurePythonEnv(splashWindow);
+
   createWindow();
+
+  // メインウィンドウが表示されるタイミングまで待つ
+  const mainWindow = BrowserWindow.getAllWindows().find(win => win !== splashWindow);
+  if (mainWindow) {
+    mainWindow.once('ready-to-show', () => {
+      if (!splashWindow.isDestroyed()) {
+        splashWindow.destroy();
+      }
+    });
+  } else {
+    if (!splashWindow.isDestroyed()) {
+      splashWindow.destroy();
+    }
+  }
 });
 
 // 全てのウィンドウが閉じられたとき
