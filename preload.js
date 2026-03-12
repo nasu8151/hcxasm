@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // COMポート通知
   onComPorts: (callback) => ipcRenderer.on('com-ports', (e, ports) => callback(ports)),
   onComPortSelected: (callback) => ipcRenderer.on('com-port-selected', (e, port) => callback(port)),
+  onArchitectureChanged: (callback) => ipcRenderer.on('architecture-changed', (e, arch) => callback(arch)),
   // トレース通知
   onTraceUpdate: (callback) => ipcRenderer.on('trace-update', (e, data) => callback(data)),
   onTraceStopped: (callback) => ipcRenderer.on('trace-stopped', (e, info) => callback(info)),
