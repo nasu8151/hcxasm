@@ -358,6 +358,15 @@ function initializeEventListeners() {
     window.electronAPI.onMenuAction((event, action, data) => {
       handleMenuAction(action, data);
     });
+    if (window.electronAPI.onArchitectureChanged) {
+      window.electronAPI.onArchitectureChanged((arch) => {
+        if (!arch || window.architecture === arch) return;
+        window.architecture = arch;
+        if (typeof initializeApp === 'function') {
+          initializeApp();
+        }
+      });
+    }
   }
 
 

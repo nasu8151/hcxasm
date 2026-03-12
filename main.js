@@ -14,6 +14,9 @@ let traceTarget = null; // WebContents
 // 未保存状態の管理（webContents.id -> boolean）
 const windowDirtyState = new Map();
 
+// アーキテクチャ選択（HC4 / HC4E）
+let currentArchitecture = 'HC4E';
+
 // --- Python仮想環境の用意 ---
 function getVenvPaths() {
   const venvRoot = path.join(app.getPath('userData'), 'python-venv');
@@ -257,6 +260,31 @@ function createMenu(mainWindow) {
           )
         },
         {
+          label: 'Architecture',
+          submenu: [
+            {
+              label: 'HC4',
+              type: 'radio',
+              checked: currentArchitecture === 'HC4',
+              click: () => {
+                currentArchitecture = 'HC4';
+                mainWindow.webContents.send('architecture-changed', 'HC4');
+                Menu.setApplicationMenu(createMenu(mainWindow));
+              }
+            },
+            {
+              label: 'HC4E',
+              type: 'radio',
+              checked: currentArchitecture === 'HC4E',
+              click: () => {
+                currentArchitecture = 'HC4E';
+                mainWindow.webContents.send('architecture-changed', 'HC4E');
+                Menu.setApplicationMenu(createMenu(mainWindow));
+              }
+            }
+          ]
+        },
+        {
           label: 'Export as assembly',
           accelerator: 'CmdOrCtrl+E',
           click: () => {
@@ -330,6 +358,10 @@ function createWindow() {
   // HTMLファイルをロード
   const htmlFile = path.join(__dirname, 'index.html');
   mainWindow.loadFile(htmlFile);
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.send('architecture-changed', currentArchitecture);
+  });
 
   // ウィンドウが準備できたら表示
   mainWindow.once('ready-to-show', () => {
