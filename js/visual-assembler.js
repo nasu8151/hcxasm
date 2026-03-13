@@ -1043,6 +1043,15 @@ function initializeWorkspace() {
     }
   });
 
+  // 動的スクリプト読み込み時でも描画サイズを確定させる
+  setTimeout(() => {
+    try {
+      Blockly.svgResize(workspace);
+    } catch (e) {
+      console.error('[ERROR] svgResize failed:', e);
+    }
+  }, 0);
+
   registerDuplicateChainMenu(workspace);
   registerToolboxSidebar(workspace);
 

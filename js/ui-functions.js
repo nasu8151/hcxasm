@@ -350,24 +350,30 @@ function cancelLabelCreation() {
 
 // 重複リスナー登録防止フラグ
 let eventListenersInitialized = false;
+let labelInputListenerInitialized = false;
+
+function initializeLabelInputListener() {
+  if (labelInputListenerInitialized) return;
+  const input = document.getElementById('labelInput');
+  if (!input) return;
+
+  input.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      confirmLabelCreation();
+    } else if (e.key === 'Escape') {
+      cancelLabelCreation();
+    }
+  });
+
+  labelInputListenerInitialized = true;
+}
 
 // イベントリスナーの初期化
 function initializeEventListeners() {
   if (eventListenersInitialized) return;
 
-  // Enterキーでの確定（1回のみ）
-  document.addEventListener('DOMContentLoaded', function() {
-    const input = document.getElementById('labelInput');
-    if (input) {
-      input.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-          confirmLabelCreation();
-        } else if (e.key === 'Escape') {
-          cancelLabelCreation();
-        }
-      });
-    }
-  }, { once: true });
+  // Enterキーでの確定（動的ロード時にも対応）
+  initializeLabelInputListener();
 
   // メニューアクションリスナー（Electronのメニューからの操作）を1回だけ登録
   if (typeof window.electronAPI !== 'undefined') {
@@ -438,11 +444,17 @@ function initializeApp() {
   initializeEventListeners();
 }
 
-// DOMContentLoadedイベントでアプリケーションを初期化
-document.addEventListener('DOMContentLoaded', function() {
+function bootstrapApp() {
   initializeApp();
   initSplitters();
-});
+}
+
+// 動的ロード時はDOMContentLoadedが既に発火済みのため、readyStateで分岐
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrapApp, { once: true });
+} else {
+  bootstrapApp();
+}
 
 // スプリッター初期化（ツールボックス、出力タブのリサイズ）
 function initSplitters() {

@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
 
 // COMポート管理（スキャン結果と選択状態）
@@ -16,6 +18,13 @@ const windowDirtyState = new Map();
 
 // アーキテクチャ選択（HC4 / HC4E）
 let currentArchitecture = 'HC4E';
+
+const BLOCKLY_CDN_URL = 'https://unpkg.com/blockly/blockly.min.js';
+
+// Python環境準備状態
+let pythonEnvStatus = 'idle'; // idle | preparing | ready | failed
+let pythonEnvError = null;
+let pythonEnvPromise = null;
 
 // --- Python仮想環境の用意 ---
 function getVenvPaths() {
@@ -63,15 +72,114 @@ function spawnAsync(cmd, args) {
   });
 }
 
+function getBlocklyCachePath() {
+  return path.join(app.getPath('userData'), 'assets-cache', 'blockly.min.js');
+}
+
+function getBlocklyScriptSrc() {
+  const cachePath = getBlocklyCachePath();
+  if (fs.existsSync(cachePath)) {
+    return pathToFileURL(cachePath).toString();
+  }
+  return BLOCKLY_CDN_URL;
+}
+
+function downloadToFile(url, filePath, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error('redirect limit exceeded'));
+      return;
+    }
+
+    const req = https.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        let nextUrl = null;
+        try {
+          nextUrl = new URL(res.headers.location, url).toString();
+        } catch (e) {
+          reject(new Error(`invalid redirect URL: ${res.headers.location}`));
+          return;
+        }
+        downloadToFile(nextUrl, filePath, redirectCount + 1).then(resolve).catch(reject);
+        return;
+      }
+
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`download failed with status ${res.statusCode}`));
+        return;
+      }
+
+      const tmpPath = `${filePath}.tmp`;
+      const out = fs.createWriteStream(tmpPath);
+      res.pipe(out);
+
+      out.on('finish', () => {
+        out.close(() => {
+          try {
+            fs.renameSync(tmpPath, filePath);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+
+      out.on('error', (e) => {
+        try {
+          out.close(() => {
+            try { fs.unlinkSync(tmpPath); } catch (_) {}
+            reject(e);
+          });
+        } catch (_) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('download timeout'));
+    });
+  });
+}
+
+async function ensureBlocklyCached() {
+  const cachePath = getBlocklyCachePath();
+  if (fs.existsSync(cachePath)) {
+    return { cached: true, path: cachePath };
+  }
+
+  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+  try {
+    await downloadToFile(BLOCKLY_CDN_URL, cachePath);
+    console.log('[INFO] Blockly cached at:', cachePath);
+    return { cached: true, path: cachePath };
+  } catch (e) {
+    console.warn('[WARN] Blockly cache download failed:', e.message);
+    return { cached: false, error: e.message };
+  }
+}
+
 async function ensurePythonEnv(splashWindow) {
+  if (pythonEnvPromise) {
+    return pythonEnvPromise;
+  }
+
   const updateSplash = (msg, progress) => {
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.webContents.send('progress', { message: msg, progress });
     }
   };
 
-  try {
-    const { venvRoot, pythonExe, pipExe } = getVenvPaths();
+  pythonEnvStatus = 'preparing';
+  pythonEnvError = null;
+
+  pythonEnvPromise = (async () => {
+    try {
+    const prepStart = Date.now();
+    const { venvRoot, pythonExe } = getVenvPaths();
     
     updateSplash('Python環境を確認中...', 10);
     
@@ -82,8 +190,9 @@ async function ensurePythonEnv(splashWindow) {
       if (!sysPy) {
         console.error('[ERROR] Python 3.x が見つかりません');
         updateSplash('Python 3.x が見つかりません。起動を継続します。', 100);
-        await new Promise(r => setTimeout(r, 1500));
-        return; // 起動は継続、エクスポート時に詳細エラーを返す
+        pythonEnvStatus = 'failed';
+        pythonEnvError = 'Python 3.x が見つかりません。';
+        return;
       }
       
       updateSplash('仮想環境（venv）を作成中...（この処理には時間がかかります）', 40);
@@ -91,40 +200,55 @@ async function ensurePythonEnv(splashWindow) {
       if (mk.status !== 0) {
         console.error('[ERROR] venv作成に失敗:', mk.stderr);
         updateSplash('venvの作成に失敗しました。', 100);
-        await new Promise(r => setTimeout(r, 1500));
+        pythonEnvStatus = 'failed';
+        pythonEnvError = `venv作成に失敗: ${mk.stderr || 'unknown error'}`;
         return;
       }
     }
     
-    // pip確認・アップグレード
+    // 必要パッケージのみ不足時にインストール
     if (fs.existsSync(pythonExe)) {
-      updateSplash('pipを確認中...', 60);
-      await spawnAsync(pythonExe, ['-m', 'pip', '--version']);
-      
-      updateSplash('pipをアップグレード中...', 70);
-      await spawnAsync(pythonExe, ['-m', 'pip', 'install', '--upgrade', 'pip']);
-      
-      // 必要パッケージのインストール
+      updateSplash('必要パッケージを確認中...', 70);
       const requiredPackages = ['pyserial'];
       for (let i = 0; i < requiredPackages.length; i++) {
         const pkg = requiredPackages[i];
-        const progress = 70 + Math.floor(30 * ((i + 1) / requiredPackages.length));
-        updateSplash(`パッケージ '${pkg}' をインストール中...`, progress - 5);
-        await spawnAsync(pythonExe, ['-m', 'pip', 'install', pkg]);
-        updateSplash(`パッケージ '${pkg}' インストール完了`, progress);
+        const progress = 75 + Math.floor(20 * ((i + 1) / requiredPackages.length));
+        const check = await spawnAsync(pythonExe, ['-m', 'pip', 'show', pkg]);
+        if (check.status !== 0) {
+          updateSplash(`パッケージ '${pkg}' をインストール中...`, progress - 5);
+          const install = await spawnAsync(pythonExe, ['-m', 'pip', 'install', pkg]);
+          if (install.status !== 0) {
+            pythonEnvStatus = 'failed';
+            pythonEnvError = `パッケージ '${pkg}' のインストールに失敗: ${install.stderr || 'unknown error'}`;
+            updateSplash(`パッケージ '${pkg}' のインストールに失敗しました。`, 100);
+            return;
+          }
+        }
+        updateSplash(`パッケージ '${pkg}' 確認完了`, progress);
       }
     }
     
+    pythonEnvStatus = 'ready';
+    console.log(`[PERF] ensurePythonEnv finished in ${Date.now() - prepStart}ms`);
     updateSplash('起動準備完了', 100);
-    await new Promise(r => setTimeout(r, 500)); // 少し待機して100%を見せる
   } catch (e) {
     console.error('[ERROR] ensurePythonEnv中に例外:', e);
-  }
+      pythonEnvStatus = 'failed';
+      pythonEnvError = e.message;
+    }
+  })();
+
+  return pythonEnvPromise;
 }
 
 // COMポートをpyserialで列挙
-function scanComPorts() {
+async function scanComPorts() {
   try {
+    const scanStart = Date.now();
+    if (pythonEnvPromise && pythonEnvStatus === 'preparing') {
+      await pythonEnvPromise;
+    }
+
     const { pythonExe } = getVenvPaths();
     let pythonCmd = null;
     if (fs.existsSync(pythonExe)) {
@@ -141,21 +265,22 @@ function scanComPorts() {
       'res=[{"device":p.device,"description":getattr(p,"description",None),"hwid":getattr(p,"hwid",None)} for p in lp.comports()]',
       'print(json.dumps(res))'
     ].join('\n');
-    const r = spawnSync(pythonCmd, ['-c', script], { windowsHide: true });
+    const r = await spawnAsync(pythonCmd, ['-c', script]);
     if (r.status === 0) {
       try {
-        const list = JSON.parse((r.stdout||'').toString());
+        const list = JSON.parse((r.stdout || '').toString());
         availablePorts = Array.isArray(list) ? list : [];
         // 既存の選択が無ければ最初を選択
         if (!selectedComPort && availablePorts.length) {
           selectedComPort = availablePorts[0];
         }
+        console.log(`[PERF] scanComPorts finished in ${Date.now() - scanStart}ms`);
         return { success: true, ports: availablePorts };
       } catch (e) {
         return { success: false, error: 'ポート一覧の解析に失敗: ' + e.message };
       }
     }
-    return { success: false, error: (r.stderr||'').toString() || 'pyserial列挙が失敗しました' };
+    return { success: false, error: (r.stderr || '').toString() || 'pyserial列挙が失敗しました' };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -233,8 +358,8 @@ function createMenu(mainWindow) {
       submenu: [
         {
           label: 'Scan COM Ports',
-          click: () => {
-            const res = scanComPorts();
+          click: async () => {
+            const res = await scanComPorts();
             if (!res.success) {
               dialog.showErrorBox('COMポート検索エラー', res.error);
             }
@@ -348,16 +473,14 @@ function createWindow() {
     show: false // 準備ができるまで非表示
   });
 
-  // メニューバーを設定
-  const menu = createMenu(mainWindow);
-  Menu.setApplicationMenu(menu);
-
   const webContentsId = mainWindow.webContents.id;
   windowDirtyState.set(webContentsId, false);
 
   // HTMLファイルをロード
   const htmlFile = path.join(__dirname, 'index.html');
-  mainWindow.loadFile(htmlFile);
+  mainWindow.loadFile(htmlFile, {
+    query: { blocklySrc: getBlocklyScriptSrc() }
+  });
 
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.webContents.send('architecture-changed', currentArchitecture);
@@ -366,6 +489,16 @@ function createWindow() {
   // ウィンドウが準備できたら表示
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+
+    // 初期表示を優先し、メニュー設定やCOMスキャンは表示後に実行
+    setImmediate(async () => {
+      Menu.setApplicationMenu(createMenu(mainWindow));
+      const res = await scanComPorts();
+      if (res.success) {
+        mainWindow.webContents.send('com-ports', availablePorts);
+        Menu.setApplicationMenu(createMenu(mainWindow));
+      }
+    });
   });
 
   // 開発者ツールを開く（開発時のみ）
@@ -401,6 +534,11 @@ function createWindow() {
 
 // アプリが準備完了したときに実行
 app.whenReady().then(async () => {
+  const startupBegin = Date.now();
+
+  // Blocklyが無い場合は起動中にキャッシュを作成（次回起動でローカル利用）
+  ensureBlocklyCached();
+
   // スプラッシュ画面の作成
   const splashWindow = new BrowserWindow({
     width: 450,
@@ -422,15 +560,17 @@ app.whenReady().then(async () => {
     splashWindow.show();
   });
 
-  // 起動時に仮想環境を確認・作成（スプラッシュ画面へ進捗を渡す）
-  await ensurePythonEnv(splashWindow);
-
+  // メインウィンドウを先に表示し、Python環境準備はバックグラウンド化
   createWindow();
+  ensurePythonEnv(splashWindow).catch((e) => {
+    console.error('[ERROR] バックグラウンドPython準備に失敗:', e);
+  });
 
   // メインウィンドウが表示されるタイミングまで待つ
   const mainWindow = BrowserWindow.getAllWindows().find(win => win !== splashWindow);
   if (mainWindow) {
     mainWindow.once('ready-to-show', () => {
+      console.log(`[PERF] ready-to-show in ${Date.now() - startupBegin}ms`);
       if (!splashWindow.isDestroyed()) {
         splashWindow.destroy();
       }
@@ -453,6 +593,13 @@ app.on('window-all-closed', () => {
 // デバイスへアップロード（クリーン版）
 ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => {
   try {
+    if (pythonEnvPromise && pythonEnvStatus === 'preparing') {
+      await pythonEnvPromise;
+    }
+    if (pythonEnvStatus === 'failed' && !fs.existsSync(getVenvPaths().pythonExe)) {
+      return { success: false, error: pythonEnvError || 'Python環境準備に失敗しました。' };
+    }
+
     if (!selectedComPort || !selectedComPort.device) {
       return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select から選択してください。' };
     }
@@ -559,6 +706,13 @@ app.on('activate', () => {
 // レジスタ取得（load4e.py register）
 ipcMain.handle('fetch-registers', async () => {
   try {
+    if (pythonEnvPromise && pythonEnvStatus === 'preparing') {
+      await pythonEnvPromise;
+    }
+    if (pythonEnvStatus === 'failed' && !fs.existsSync(getVenvPaths().pythonExe)) {
+      return { success: false, error: pythonEnvError || 'Python環境準備に失敗しました。' };
+    }
+
     if (!selectedComPort || !selectedComPort.device) {
       return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select で選択してください。' };
     }
@@ -607,6 +761,13 @@ ipcMain.handle('fetch-registers', async () => {
 // トレース開始（load4e.py trace --json）
 ipcMain.handle('start-trace', async (event) => {
   try {
+    if (pythonEnvPromise && pythonEnvStatus === 'preparing') {
+      await pythonEnvPromise;
+    }
+    if (pythonEnvStatus === 'failed' && !fs.existsSync(getVenvPaths().pythonExe)) {
+      return { success: false, error: pythonEnvError || 'Python環境準備に失敗しました。' };
+    }
+
     if (traceProcess) {
       return { success: true, alreadyRunning: true };
     }
