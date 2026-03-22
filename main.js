@@ -637,7 +637,7 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
     }
 
     const archArg = (architecture === 'HC4E') ? 'HC4E' : 'HC4';
-    const assembleArgs = [hcxasmPath, asmPath, '-o', hexPath, '-f', 'ihex', '-a', archArg];
+    const assembleArgs = [hcxasmPath, asmPath, '-o', hexPath, '-f', 'ihex', '-a', archArg, '-v'];
     logs.push('Assembler command: ' + fmtCmd(pythonCmd, assembleArgs));
     const asmProc = spawnSync(pythonCmd, assembleArgs, {
       cwd: path.dirname(hcxasmPath),
@@ -1010,7 +1010,7 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
       const args = [hcxasmPath, tempAsmPath, '-o', result.filePath];
       // アーキテクチャ指定（デフォルトHC4）
       const archArg = (architecture === 'HC4E') ? 'HC4E' : 'HC4';
-      args.push('-a', archArg);
+      args.push('-a', archArg, '-v');
       
       // 拡張子に応じて形式オプションを追加
       if (fileExt === '.hex') {

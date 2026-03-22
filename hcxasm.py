@@ -19,6 +19,7 @@ import sys
 import os
 from typing import Optional, Sequence
 from pathlib import Path
+import re
 
 sys.path.append(os.path.join(os.path.dirname(__file__), './py'))
 
@@ -93,21 +94,21 @@ def read_asm_file(filename:str):
         print(f"[Error]: An error occurred while reading the file '{filename}': {e}", file=sys.stderr)
         sys.exit(1)
 
-def write_binary_output(filename:str, machine_code:list[tuple[int, int]]):
+def write_binary_output(filename:str, machine_code:list[int]):
     """バイナリ形式で出力"""
     try:
         with open(filename, 'wb') as f:
-            f.write(bytes([byte for byte, _ in machine_code]))
+            f.write(bytes(machine_code))
         return True
     except Exception as e:
         print(f"[Error]: An error occurred while writing the binary file '{filename}': {e}", file=sys.stderr)
         return False
     
-def write_verilog_hex_output(filename:str, machine_code:list[tuple[int, int]]):
+def write_verilog_hex_output(filename:str, machine_code:list[int]):
     """verilogのHEX形式で出力"""
     try:
         with open(filename, 'w', encoding='utf-8') as f:
-            for i, _ in machine_code:
+            for i in machine_code:
                 f.write(f"{i:02X}\n")
         return True
     except Exception as e:
@@ -115,7 +116,7 @@ def write_verilog_hex_output(filename:str, machine_code:list[tuple[int, int]]):
         return False
 
 
-def write_intel_hex_output(filename:str, machine_code:list[tuple[int, int]]):
+def write_intel_hex_output(filename:str, machine_code:list[int]):
     """Intel HEX形式で出力"""
     try:
         with open(filename, 'w', encoding='utf-8') as f:
@@ -127,13 +128,13 @@ def write_intel_hex_output(filename:str, machine_code:list[tuple[int, int]]):
                 
                 # チェックサムの計算
                 checksum = data_len + (address >> 8) + (address & 0xFF)
-                for byte_val, _ in chunk:
+                for byte_val in chunk:
                     checksum += byte_val
                 checksum = (~checksum + 1) & 0xFF
                 
                 # Intel HEX行の生成
                 hex_line = f":{data_len:02X}{address:04X}00"
-                for byte_val, _ in chunk:
+                for byte_val in chunk:
                     hex_line += f"{byte_val:02X}"
                 hex_line += f"{checksum:02X}"
                 
@@ -148,13 +149,14 @@ def write_intel_hex_output(filename:str, machine_code:list[tuple[int, int]]):
         return False
 
 
-def write_list_output(filename:str, lines:Sequence[tuple[str, int, str]], machine_code: Sequence[tuple[int, int]], ls:assembler.LinkState):
+def write_list_output(filename:str, lines:Sequence[tuple[str, int, str, int]], adr_list: dict[int, tuple[int, int]], ls:assembler.LinkState):
     """
     Write output in text format with machine code and source code correspondence.
     Args:
         filename (str): Output text file name.
         lines (Sequence[tuple[str, int, str]]): List of tuple(line:str, lineno:int, unprocessed_line:str).
-        machine_code (Sequence[tuple[int, int]]): List of assembled lines with machine code and line numbers.
+        adr_list (dict[int, tuple[int, int]]): Dictionary mapping addresses to tuples of machine code and line numbers.
+        ls (assembler.LinkState): Link state containing label information.
     Returns:
         bool: True if writing is successful, False otherwise.
     """
@@ -171,25 +173,23 @@ def write_list_output(filename:str, lines:Sequence[tuple[str, int, str]], machin
             f.write("line  address  machine code  source code\n")
             f.write("-" * 50 + "\n")
             
-            address = 0
-            for result in lines:
-                source_line, line_num, unprocessed_line = result
-                if address < len(machine_code) and machine_code[address][1] == line_num:
-                    byte_val, _ = machine_code[address]
-                    f.write(f"{line_num:4d}  {address:04X}     {byte_val:02X}            {unprocessed_line}\n")
-                    address += 1
+            for source_line, line_num, unprocessed_line, address_src in lines:
+                if address_src in adr_list and adr_list[address_src][1] == line_num and unprocessed_line and unprocessed_line.strip().split()[0].upper() in assembler.INST_TYPES:
+                    byte_val, _ = adr_list[address_src]
+                    f.write(f"{line_num:4d}  {address_src:04X}     {byte_val:02X}            {unprocessed_line}\n")
                 else:
-                    f.write(f"{line_num:4d}  {address:04X}                   {unprocessed_line}\n")
+                    f.write(f"{line_num:4d}  {address_src:04X}                   {unprocessed_line}\n")
 
-            
+            bitstream = assembler.adrlist2bitstream(adr_list, 255)
+
             f.write("\n" + "-" * 50 + "\n")
-            f.write(f"Generated machine code: {len(machine_code)} bytes\n\n")
+            f.write(f"Generated machine code: {len(bitstream)} bytes\n\n")
             
             # Hex dump
             f.write("Hex dump:\n")
-            for i in range(0, len(machine_code), 16):
-                chunk = machine_code[i:i+16]
-                hex_str = " ".join(f"{byte_val:02X}" for byte_val, _ in chunk)
+            for i in range(0, len(bitstream), 16):
+                chunk = bitstream[i:i+16]
+                hex_str = " ".join(f"{byte_val:02X}" for byte_val in chunk)
                 f.write(f"{i:04X}: {hex_str:<47}\n")
                 
         return True
@@ -224,8 +224,7 @@ def main(args):
     
     # Check if input file exists
     if not os.path.exists(args.input_file):
-        print(f"[Error] Input file '{args.input_file}' does not exist.", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"[Error] Input file '{args.input_file}' does not exist.")
     
     # Determine output file name
     output_filename = determine_output_filename(args.input_file, args.output, args.format)
@@ -242,7 +241,7 @@ def main(args):
     # Write output file
     include_dir = Path(__file__).resolve().parent / 'include'
     default_include_pathes = [os.path.dirname(args.input_file)] + args.include_path + [str(include_dir)]
-    processed_lines = assembler.preprocess(lines, False, default_include_pathes)
+    processed_lines = assembler.preprocess(lines, False, 0, default_include_pathes)
     if args.verbose:
         print(f"[Info] Preprocessed {len(processed_lines)} lines.")
         print(processed_lines)
@@ -252,18 +251,18 @@ def main(args):
 
     success = False
     if args.format == 'binary':
-        success = write_binary_output(output_filename, machine_code)
+        success = write_binary_output(output_filename, assembler.adrlist2bitstream(machine_code, 255))
     elif args.format == 'ihex':
-        success = write_intel_hex_output(output_filename, machine_code)
+        success = write_intel_hex_output(output_filename, assembler.adrlist2bitstream(machine_code, 255))
     elif args.format == 'hex' or args.format == 'vhex':
-        success = write_verilog_hex_output(output_filename, machine_code)
+        success = write_verilog_hex_output(output_filename, assembler.adrlist2bitstream(machine_code, 255))
     elif args.format == 'list' or args.format == 'text':
         success = write_list_output(output_filename, processed_lines, machine_code, ls)
     
     if not success:
         sys.exit(1)
 
-    print(f"[Info] Assembled {machine_code[-1][1]} lines into {len(machine_code)} bytes.")
+    print(f"[Info] Assembled {len(processed_lines)} lines into {len(assembler.adrlist2bitstream(machine_code, 255))} bytes.")
     if args.verbose:
         print(f"[Info] Architecture: {args.architecture}")
         print(f"[Info] Output format: {args.format}")

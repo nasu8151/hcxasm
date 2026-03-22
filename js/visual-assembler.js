@@ -799,9 +799,11 @@ function initializeBlocks() {
   // マクロ類
   makeMacroblock_regregreg('m_add', 'ADD', 200);
   makeMacroblock_regregimm('m_addi', 'ADDI', 205);
-  makeMacroblock_regreg('m_mov', 'MOV', 210);
-  makeMacroblock_regimm('m_movi', 'MOVI', 215);
-  makeNoArgBlock('m_hlt', 'HLT', 220);
+  makeMacroblock_regregreg('m_nand', 'NAND', 210);
+  makeMacroblock_regregimm('m_nandi', 'NANDI', 215);
+  makeMacroblock_regreg('m_mov', 'MOV', 220);
+  makeMacroblock_regimm('m_movi', 'MOVI', 225);
+  makeNoArgBlock('m_hlt', 'HLT', 230);
 }
 
 // --- コード生成ルール（独自アセンブリ出力） ---
@@ -918,6 +920,20 @@ function initializeCodeGenerator() {
     return 'ADDI ' + dst + ' ' + src + ' #' + imm + '\n';
   }
 
+  Blockly.Assembly.forBlock['m_nand'] = function(block) {
+    var dst = block.getFieldValue('DST');
+    var src1 = block.getFieldValue('SRC1');
+    var src2 = block.getFieldValue('SRC2');
+    return 'NAND ' + dst + ' ' + src1 + ' ' + src2 + '\n';
+  }
+
+  Blockly.Assembly.forBlock['m_nandi'] = function(block) {
+    var dst = block.getFieldValue('DST');
+    var src = block.getFieldValue('SRC');
+    var imm = block.getFieldValue('IMM');
+    return 'NANDI ' + dst + ' ' + src + ' #' + imm + '\n';
+  }
+
   Blockly.Assembly.forBlock['m_mov'] = function(block) {
     var dst = block.getFieldValue('DST');
     var src = block.getFieldValue('SRC');
@@ -933,7 +949,7 @@ function initializeCodeGenerator() {
   Blockly.Assembly.forBlock['m_hlt'] = function(block) {
     return 'HALT\n';
   }
-  
+
   Blockly.Assembly.init = function(workspace) {};
   Blockly.Assembly.finish = function(code) { return code; };
   Blockly.Assembly.scrub_ = function(block, code) {
@@ -989,6 +1005,8 @@ function getToolboxConfig() {
     { "kind": "block", "type": "goto_if" },
     { "kind": "block", "type": "m_add" },
     { "kind": "block", "type": "m_addi" },
+    { "kind": "block", "type": "m_nand" },
+    { "kind": "block", "type": "m_nandi" },
     { "kind": "block", "type": "m_mov" },
     { "kind": "block", "type": "m_movi" },
     { "kind": "block", "type": "m_hlt" }

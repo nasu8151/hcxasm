@@ -42,3 +42,15 @@
 __halt:
     JP
 .ENDMACRO
+
+.MACRO NAND dst src1 src2
+    LD src1
+    LD src2
+    XR dst
+.ENDMACRO
+
+.MACRO NANDI dst src1 imm
+    LD src1
+    LI imm
+    XR dst
+.ENDMACRO
