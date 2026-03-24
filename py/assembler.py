@@ -216,7 +216,7 @@ def preprocess(lines:Sequence[str], child:bool, lineno_start:int, include_pathes
     processed: list[tuple[str, int, str, int]] = []
     i = 0
     lineno = lineno_start
-    print(address)
+    # print(address)
     while i < len(lines):
         i += 1
         line = lines[i - 1].strip()

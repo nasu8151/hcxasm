@@ -21,10 +21,8 @@ from typing import Optional, Sequence
 from pathlib import Path
 import re
 
-sys.path.append(os.path.join(os.path.dirname(__file__), './py'))
-
-import py.assembler as assembler
-
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'py'))
+import assembler
 
 def parse_arguments():
     """コマンドライン引数の解析"""
@@ -244,7 +242,7 @@ def main(args):
     processed_lines = assembler.preprocess(lines, False, 0, default_include_pathes)
     if args.verbose:
         print(f"[Info] Preprocessed {len(processed_lines)} lines.")
-        print(processed_lines)
+        # print(processed_lines)
     ls = assembler.LinkState()
     
     machine_code = assembler.assemble(tuple((pl[0], pl[1]) for pl in processed_lines), ls, args.architecture)
