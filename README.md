@@ -1,113 +1,245 @@
-# HCx Series Assembler
+# HCx Assembler / Visual Assembler
 
-## Description : hcxasm
+[English README](README_EN.md)
 
-This is an assembler for HC4/HC4<sub>E</sub>/HC8 CPU.
+- [HCx Assembler / Visual Assembler](#hcx-assembler--visual-assembler)
+  - [概要](#概要)
+  - [クイックスタート](#クイックスタート)
+    - [1) CLIアセンブラを使う](#1-cliアセンブラを使う)
+    - [2) Visual Assembler (vasm) を使う](#2-visual-assembler-vasm-を使う)
+    - [3) パッケージビルド (Docker)](#3-パッケージビルド-docker)
+  - [CLIリファレンス (hcxasm.py)](#cliリファレンス-hcxasmpy)
+  - [アセンブリ記法の要点](#アセンブリ記法の要点)
+  - [vasm (Visual Assembler) の位置づけ](#vasm-visual-assembler-の位置づけ)
+  - [HC4E ローダー / デバッグ (load4e.py)](#hc4e-ローダー--デバッグ-load4epy)
+  - [テスト](#テスト)
+    - [統合テスト (推奨)](#統合テスト-推奨)
+    - [追加のpytestベーステスト](#追加のpytestベーステスト)
+  - [プロジェクト構成](#プロジェクト構成)
+  - [よくある注意点](#よくある注意点)
+  - [関連ドキュメント](#関連ドキュメント)
+  - [ライセンス](#ライセンス)
 
+HCx CPU系列向けのアセンブラ開発環境です。以下の2つを1つのリポジトリで提供します。
 
-## Syntax
-### Basic syntax
+- hcxasm: Python製のCLIアセンブラ
+- vasm: Electron + Blockly製のVisual Assembler
 
-Let's get right to the explanation, but first, we tell you one.
-On HC4 assembler, comments are represented by `;`. characters on the line after `;` are ignored during assembly.
+本READMEは、開発者および外部利用者が「セットアップ -> 実行 -> 検証 -> 拡張」まで到達できることを目的にしています。
+
+## 概要
+
+- 対象CPU: HC4 / HC4E
+- 入力: `.asm`ファイル、またはBlocklyブロック
+- 出力: `binary` / `hex` / `vhex` / `ihex` / `text` / `list`
+- 補助機能: HC4E向けシリアルローダー (`load4e.py`)
+
+注: リポジトリ内にHC8の命令資料はありますが、現行CLI (`hcxasm.py`) のターゲット選択は `HC4` と `HC4E` です。
+
+## クイックスタート
+
+### 1) CLIアセンブラを使う
+
+前提:
+
+- Python 3.x
+
+基本実行:
+
+```bash
+python hcxasm.py test/sample.asm
 ```
-<Instruction>
-<Instruction> <reg> ;reg means a 4-bit wide register. In the program, it is represented by r0 to r15 in program.
-<Instruction> <imm> ;imm means 4 bits wide immediate data. In a program, it is represented as literal such as #12, #0xC or #0b1100.
-<Instruction> <flg> ;flg means flags. There are two types of flags: C and Z. The C flag is the carry flag, and the Z flag is the zero flag. 
 
-;Addressing option is represented [AB] for SC or [ABC] for JP.
-;[AB] means indirect addressing of stack level A and B. MSB is level B.
-;[ABC] means indirect addressing of stack level A, B and C. MSB is level C.
-<Instruction>             ; for load and store instructions
-<Instruction> <flg>       ; for jump instructions
+主な使用例:
+
+```bash
+# 出力ファイルを指定
+python hcxasm.py test/sample.asm -o sample.bin
+
+# Intel HEXで出力
+python hcxasm.py py/test_files/dice4e.asm -a HC4E -f ihex -o dice4e.hex
+
+# リスト出力 (ソース対応付き)
+python hcxasm.py test/sample.asm -f list -o sample.lst -v
+
+# .INCLUDE検索パスを追加
+python hcxasm.py test/sample.asm -L ./include
 ```
 
-### Labels
+### 2) Visual Assembler (vasm) を使う
 
-Labels are used to simplify address specification in programs.
+前提:
+
+- Node.js + npm
+
+起動:
+
+```bash
+npm install
+npm start
+```
+
+開発ログ付き起動:
+
+```bash
+npm run dev
+```
+
+起動後の基本フロー:
+
+1. ブロックを配置して命令列を作成
+2. ラベルを定義してJP/GOTO系ブロックに割り当て
+3. 生成されたアセンブリを保存
+4. 必要に応じて `hcxasm.py` で再アセンブル
+
+### 3) パッケージビルド (Docker)
+
+Windows向け配布物をDocker上で作成できます。
+
+```powershell
+docker compose build
+npm run build:win:docker
+```
+
+詳細は [BUILD.md](BUILD.md) を参照してください。
+
+## CLIリファレンス (hcxasm.py)
+
+```text
+python hcxasm.py <input.asm> [options]
+
+Options:
+  -o, --output <file>          出力ファイル名
+  -a, --architecture <arch>    HC4 | HC4E (default: HC4)
+  -f, --format <fmt>           binary | hex | ihex | vhex | text | list
+  -v, --verbose                詳細ログを表示
+  -q, --quiet                  出力メッセージを抑制
+  -L, --include-path <path>    .INCLUDE 検索パスを追加 (複数指定可)
+```
+
+## アセンブリ記法の要点
+
+コメント:
+
+- `;` 以降はコメントとして扱われます
+- `//` 形式のコメントも利用できます
+
+オペランド:
+
+- `r0` - `r15`: 4bitレジスタ
+- `#i`: 即値 (`#12`, `#0xC`, `#0b1100` など)
+- `JP` 条件: `C`, `NC`, `Z`, `NZ` など
+
+ラベル指定:
+
 ```assembly
-label: ; Define a label
-li #label:2 ; parse label into immediate value
-li #label:1 ; `label:3` picks value from label[15:12], `label:2` picks from label[11:8].
-li #label:0 ; `label:1` picks from label[7:4], `label:0` picks from label[3:0].
+loop:
+  li #loop:1
+  li #loop:0
+  jp
 ```
 
-### Pseudo-instruction and directives
+疑似命令/ディレクティブ:
 
 ```assembly
-.DEFINE FROM REPLACED   ; replace FROM into REPLACED in the assembly file.
-                        ; if defined within a macro, it can only be referenced from that macro.
-.MACRO NAME [ARG1 ...]  ; define macro named NAME. ARGs are not essential, if defined, it will decrear as .DEFINE
-.ENDM (or .ENDMACRO)    ; be sure to write this in the end of the macro.
-.INCLUDE (or .INC) FILE ; include FILE into assembly.
+.DEFINE FROM TO
+.MACRO NAME ARG1 ARG2
+  ; body
+.ENDM
+.INCLUDE file.inc
+.EQU NAME VALUE
 ```
 
-## Command line options
+命令詳細は [InstructionList.md](InstructionList.md) を参照してください。
 
-* ```-o```, ```--output``` :
-  * Specifies output file name.
-  * Default : ```<input_file_name>.bin```
-* ```-a```, ```--architecture``` :
-  * Select your target architecture from ```HC4``` and ```HC4E```
-  * Default : ```HC4```
-* ```-f```, ```-format``` : 
-  * Select your file output format.
-  * ```binary``` : binary file (Default)
-  * ```hex``` and ```vhex``` : hexadecimal file format for verilog simulation.
-  * ```ihex``` : intel hex
-  * ```text``` and ```list``` : list file
-* ```-v```, ```--verbose``` : 
-  * Enable the verbose output
-* ```-L```, ```--include-path``` : 
-  * Additional include path for .INCLUDE directives
+## vasm (Visual Assembler) の位置づけ
 
-## ビジュアルアセンブラ（Visual Assembler, vasm）
+vasmは、Blockly上で命令ブロックを組み立てて `.asm` を生成するフロントエンドです。
 
-### 概要
+- GUIで作成 -> テキスト `.asm` を生成
+- 生成した `.asm` はCLI (`hcxasm.py`) でそのまま利用可能
+- 代表マクロは [include/vasm.inc](include/vasm.inc) に定義
 
-ビジュアルアセンブラ（vasm）は、Blocklyベースのビジュアルプログラミング環境で、HC4/HC8 CPUアーキテクチャ向けのアセンブリプログラムを直感的に作成できます。ドラッグ&ドロップで命令やラベルを組み合わせ、即座にアセンブリコードを生成・保存できます。
+例: `GOTO` 相当マクロ (抜粋)
 
-### 主な特徴
+```assembly
+.MACRO GOTO label
+    LI #label:1
+    LI #label:0
+    JP
+.ENDMACRO
+```
 
-- HC4/HC8命令セット（DICTHC4）に完全対応
-- ラベル定義・ジャンプ命令（JP/GOTO）・即値・レジスタ選択などをブロックで表現
-- Blocklyによる視覚的なプログラミング
-- Electronアプリとしてオフライン動作
-- アセンブリファイルのエクスポート機能
-- Scratch風のラベル管理（新規作成・選択・自動反映）
+## HC4E ローダー / デバッグ (load4e.py)
 
-### 使い方
+`load4e.py` はシリアル経由でHC4Eへロード・レジスタ確認・トレースを行います。
 
-1. `index.html`をElectronアプリとして起動（またはWebサーバで開く）
-2. 左側のツールボックスから命令やラベルブロックをドラッグ＆ドロップ
-3. ブロックを組み合わせてプログラムを作成
-4. 下部に生成されるアセンブリコードを確認
-5. 「保存」ボタンでアセンブリファイル（.asm）としてエクスポート
+前提:
 
-### ブロックの種類
+- `pyserial` が必要
 
-- **命令ブロック**: SM, SC, SU, AD, XR, OR, AN, SA, LM, LD, LI, JP, NP
-- **ラベル定義ブロック**: 任意のラベル名を定義し、ジャンプ先として利用可能
-- **GOTOブロック**: ラベル名を指定してジャンプ（LI+JP命令列を自動生成）
-- **JPブロック**: フラグ条件ジャンプ
+```bash
+python -m pip install pyserial
+```
 
-### ラベル管理
+使用例:
 
-- ラベルは「ラベル」ブロックで定義
-- JPやGOTOブロックのドロップダウンから既存ラベルを選択、または新規作成
-- 新規ラベル作成時はダイアログで名前を入力
-- すべてのラベル関連ブロックに即時反映
+```bash
+# Intel HEXをロード
+python load4e.py load --file dice4e.hex --port COM3 --baudrate 115200
 
-### ファイル構成
+# レジスタ確認
+python load4e.py register --port COM3
 
-- `index.html` : メインUI・Blockly定義・コード生成
-- `main.js` : Electronメインプロセス
-- `preload.js` : ElectronセキュアAPIブリッジ
-- `package.json` : Electronアプリ設定
+# JSON形式
+python load4e.py --json register --port COM3
 
-### ライセンス
+# 実行トレース
+python load4e.py trace --port COM3
+```
 
-本ツールはMITライセンスです。
+## テスト
+
+### 統合テスト (推奨)
+
+```bash
+python py/test.py
+```
+
+このスクリプトは、複数のサンプルASMをアセンブルし、期待HEXとの差分検証を行います。
+
+### 追加のpytestベーステスト
+
+```bash
+python -m pytest test
+```
+
+## プロジェクト構成
+
+- `hcxasm.py`: CLIエントリポイント
+- `py/assembler.py`: コアアセンブラ
+- `include/vasm.inc`: vasm向けマクロ群
+- `load4e.py`: HC4Eシリアルローダー
+- `main.js`: Electronメインプロセス
+- `index.html`, `js/`: vasm UI実装
+- `BUILD.md`: Dockerビルド手順
+
+## よくある注意点
+
+- `HC4E` は命令セットが制限されます。`HC4` 用コードがそのまま通らない場合があります。
+- `.INCLUDE` の参照先が見つからない場合は `-L` を追加してください。
+- `list/text` 出力を使う場合は `-o` 指定を推奨します。
+- シリアル通信は使用ポート名とボーレート設定を確認してください。
+
+## 関連ドキュメント
+
+- [InstructionList.md](InstructionList.md): 命令表と仕様
+- [BUILD.md](BUILD.md): Dockerビルド
+- `py/test_files/*.asm`: テスト用サンプル
+- `test/*.asm`: 追加サンプル
+
+## ライセンス
+
+MIT License。詳細は `LICENCE` を参照してください。
 
 
