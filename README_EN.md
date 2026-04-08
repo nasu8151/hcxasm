@@ -2,26 +2,27 @@
 
 [日本語 README](README.md)
 
+[HCx Series](https://github.com/nasu8151/HC4) target assembler environment with two interfaces:
+
 - [HCx Assembler / Visual Assembler](#hcx-assembler--visual-assembler)
   - [Overview](#overview)
   - [Quick Start](#quick-start)
-    - [1) Use the CLI assembler](#1-use-the-cli-assembler)
-    - [2) Use Visual Assembler (vasm)](#2-use-visual-assembler-vasm)
-    - [3) Build distributables with Docker](#3-build-distributables-with-docker)
+    - [1. Use the CLI assembler](#1-use-the-cli-assembler)
+    - [2. Use Visual Assembler (vasm)](#2-use-visual-assembler-vasm)
+    - [3. Build distributables with Docker](#3-build-distributables-with-docker)
   - [CLI Reference (hcxasm.py)](#cli-reference-hcxasmpy)
   - [Assembly Syntax Essentials](#assembly-syntax-essentials)
   - [How vasm Fits](#how-vasm-fits)
   - [HC4E Loader / Debugging (load4e.py)](#hc4e-loader--debugging-load4epy)
   - [Tests](#tests)
     - [Integrated test script (recommended)](#integrated-test-script-recommended)
-    - [Additional pytest-based tests](#additional-pytest-based-tests)
   - [Project Layout](#project-layout)
   - [Common Pitfalls](#common-pitfalls)
   - [Related Documents](#related-documents)
   - [License](#license)
 
 
-This repository provides an assembler toolchain for HCx CPUs with two interfaces:
+This repository provides an assembler toolchain with two interfaces:
 
 - hcxasm: Python CLI assembler
 - vasm: Electron + Blockly visual assembler
@@ -39,7 +40,7 @@ Note: The repository includes HC8 instruction documentation, but the current CLI
 
 ## Quick Start
 
-### 1) Use the CLI assembler
+### 1. Use the CLI assembler
 
 Prerequisites:
 
@@ -67,7 +68,7 @@ python hcxasm.py test/sample.asm -f list -o sample.lst -v
 python hcxasm.py test/sample.asm -L ./include
 ```
 
-### 2) Use Visual Assembler (vasm)
+### 2. Use Visual Assembler (vasm)
 
 Prerequisites:
 
@@ -93,7 +94,7 @@ Typical flow:
 3. Save generated assembly code
 4. Assemble again with `hcxasm.py` if needed
 
-### 3) Build distributables with Docker
+### 3. Build distributables with Docker
 
 You can build Windows artifacts in Docker.
 
@@ -144,12 +145,28 @@ Pseudo instructions / directives:
 
 ```assembly
 .DEFINE FROM TO
-.MACRO NAME ARG1 ARG2
+.MACRO NAME ARG1 ARG2 ...
   ; body
 .ENDM
-.INCLUDE file.inc
+.INCLUDE /path/to/file
 .EQU NAME VALUE
 ```
+
+- `.DEFINE`, `.DEF`
+  - Args: `FROM`, `TO`
+  - Creates a symbol named `FROM` and mechanically replaces it with `TO`. This is conceptually similar to `#define` in C.
+- `.MACRO`
+  - Args: `NAME`, `ARG1`, `ARG2`, ...
+  - Defines a macro named `NAME`; subsequent occurrences of `NAME` are expanded with the macro body.
+  - `ARG1`, `ARG2`, ... are also defined as symbols inside the macro, bound to call-site values, and behave similarly to symbols created by `.DEFINE`.
+  - Always terminate macro definitions with `.ENDM` or `.ENDMACRO`.
+- `.ENDM`
+  - Args: none
+  - Ends a macro definition.
+  - Behavior is undefined when placed outside a macro definition.
+- `.INCLUDE`, `.INC`
+  - Args: `/path/to/file`
+  - Includes and assembles `/path/to/file` as part of the current source.
 
 For the full ISA details, see [InstructionList.md](InstructionList.md).
 
@@ -160,6 +177,8 @@ vasm is a front-end that builds `.asm` code by combining Blockly blocks.
 - Build in GUI -> generate text `.asm`
 - Generated `.asm` is directly consumable by CLI (`hcxasm.py`)
 - Common helper macros are in [include/vasm.inc](include/vasm.inc)
+  - These can be used as corresponding macro blocks inside vasm
+- For HC4<sub>E</sub>, the flow can be end-to-end up to writing to HC4<sub>E</sub> via `load4e.py`
 
 Example GOTO macro (excerpt):
 
@@ -208,12 +227,7 @@ python py/test.py
 ```
 
 This script assembles multiple sample programs and validates outputs against expected hex files.
-
-### Additional pytest-based tests
-
-```bash
-python -m pytest test
-```
+It also runs self-tests for each Python script.
 
 ## Project Layout
 
