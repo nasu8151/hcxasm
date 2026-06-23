@@ -70,6 +70,8 @@ python hcxasm.py test/sample.asm -L ./include
 前提:
 
 - Node.js + npm
+- Windows: 初回起動時にポータブルPythonを自動ダウンロード（要インターネット接続）
+- macOS/Linux: Python 3.x
 
 起動:
 

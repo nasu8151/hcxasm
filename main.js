@@ -5,6 +5,10 @@ const https = require('https');
 const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
 
+const PORTABLE_PYTHON_VERSION = '3.12.4';
+const PORTABLE_PYTHON_BASE_URL = 'https://www.python.org/ftp/python';
+const GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py';
+
 // COMポート管理（スキャン結果と選択状態）
 let availablePorts = [];
 let selectedComPort = null;
@@ -26,16 +30,18 @@ let pythonEnvStatus = 'idle'; // idle | preparing | ready | failed
 let pythonEnvError = null;
 let pythonEnvPromise = null;
 
-// --- Python仮想環境の用意 ---
-function getVenvPaths() {
-  const venvRoot = path.join(app.getPath('userData'), 'python-venv');
+// --- ポータブルPythonの用意 ---
+function getPortablePythonPaths() {
+  const runtimeRoot = path.join(app.getPath('userData'), 'python-portable');
   const pythonExe = process.platform === 'win32'
-    ? path.join(venvRoot, 'Scripts', 'python.exe')
-    : path.join(venvRoot, 'bin', 'python');
+    ? path.join(runtimeRoot, 'python.exe')
+    : path.join(runtimeRoot, 'bin', 'python3');
   const pipExe = process.platform === 'win32'
-    ? path.join(venvRoot, 'Scripts', 'pip.exe')
-    : path.join(venvRoot, 'bin', 'pip');
-  return { venvRoot, pythonExe, pipExe };
+    ? path.join(runtimeRoot, 'Scripts', 'pip.exe')
+    : path.join(runtimeRoot, 'bin', 'pip3');
+  const versionMarker = path.join(runtimeRoot, '.python-version');
+  const getPipPath = path.join(runtimeRoot, 'get-pip.py');
+  return { runtimeRoot, pythonExe, pipExe, versionMarker, getPipPath };
 }
 
 function chooseSystemPython() {
@@ -47,9 +53,9 @@ function chooseSystemPython() {
   return null;
 }
 
-function spawnAsync(cmd, args) {
+function spawnAsync(cmd, args, options = {}) {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { windowsHide: true });
+    const proc = spawn(cmd, args, { windowsHide: true, ...options });
     
     let stdout = '';
     let stderr = '';
@@ -145,6 +151,216 @@ function downloadToFile(url, filePath, redirectCount = 0) {
   });
 }
 
+function getPortablePythonDownloadUrl() {
+  if (process.platform !== 'win32') return null;
+  let suffix = null;
+  if (process.arch === 'x64') {
+    suffix = 'embed-amd64.zip';
+  } else if (process.arch === 'arm64') {
+    suffix = 'embed-arm64.zip';
+  } else if (process.arch === 'ia32') {
+    suffix = 'embed-win32.zip';
+  }
+  if (!suffix) return null;
+  return `${PORTABLE_PYTHON_BASE_URL}/${PORTABLE_PYTHON_VERSION}/python-${PORTABLE_PYTHON_VERSION}-${suffix}`;
+}
+
+function readVersionMarker(versionMarker) {
+  try {
+    return fs.readFileSync(versionMarker, 'utf8').trim();
+  } catch (_) {
+    return null;
+  }
+}
+
+async function extractZip(archivePath, destDir) {
+  fs.mkdirSync(destDir, { recursive: true });
+
+  const tarResult = await spawnAsync('tar', ['-xf', archivePath, '-C', destDir]);
+  if (tarResult.status === 0) {
+    return { success: true };
+  }
+
+  if (process.platform === 'win32') {
+    const psArchive = archivePath.replace(/'/g, "''");
+    const psDest = destDir.replace(/'/g, "''");
+    const cmd = `Expand-Archive -LiteralPath '${psArchive}' -DestinationPath '${psDest}' -Force`;
+    const psResult = await spawnAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', cmd]);
+    if (psResult.status === 0) {
+      return { success: true };
+    }
+    return { success: false, error: psResult.stderr || (psResult.error ? psResult.error.message : '') || 'Expand-Archive failed' };
+  }
+
+  const unzipResult = await spawnAsync('unzip', ['-o', archivePath, '-d', destDir]);
+  if (unzipResult.status === 0) {
+    return { success: true };
+  }
+  return { success: false, error: unzipResult.stderr || (unzipResult.error ? unzipResult.error.message : '') || 'unzip failed' };
+}
+
+function enableEmbeddableSitePackages(runtimeRoot) {
+  let pthFile = null;
+  try {
+    pthFile = fs.readdirSync(runtimeRoot).find((name) => name.toLowerCase().endsWith('._pth')) || null;
+  } catch (_) {
+    return;
+  }
+  if (!pthFile) return;
+
+  const pthPath = path.join(runtimeRoot, pthFile);
+  let content = '';
+  try {
+    content = fs.readFileSync(pthPath, 'utf8');
+  } catch (_) {
+    return;
+  }
+
+  const lines = content.split(/\r?\n/);
+  let siteIndex = lines.findIndex((line) => {
+    const trimmed = line.trim();
+    return trimmed === '#import site' || trimmed === 'import site';
+  });
+  let changed = false;
+
+  if (siteIndex === -1) {
+    lines.push('import site');
+    siteIndex = lines.length - 1;
+    changed = true;
+  } else if (lines[siteIndex].trim() === '#import site') {
+    lines[siteIndex] = 'import site';
+    changed = true;
+  }
+
+  const hasSitePackages = lines.some((line) => line.trim().toLowerCase() === 'lib\\site-packages');
+  if (!hasSitePackages) {
+    lines.splice(siteIndex, 0, 'Lib\\site-packages');
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(pthPath, lines.join('\n'), 'utf8');
+  }
+
+  fs.mkdirSync(path.join(runtimeRoot, 'Lib', 'site-packages'), { recursive: true });
+}
+
+async function ensurePipInstalled(pythonExe, runtimeRoot, updateSplash) {
+  const pipEnv = { ...process.env, PIP_DISABLE_PIP_VERSION_CHECK: '1', PYTHONIOENCODING: 'utf-8' };
+  const check = await spawnAsync(pythonExe, ['-m', 'pip', '--version'], { env: pipEnv });
+  if (check.status === 0) return;
+
+  if (!runtimeRoot) {
+    throw new Error('pipが見つかりません。');
+  }
+
+  if (updateSplash) {
+    updateSplash('pipをインストール中...', 60);
+  }
+
+  const getPipPath = path.join(runtimeRoot, 'get-pip.py');
+  if (!fs.existsSync(getPipPath)) {
+    await downloadToFile(GET_PIP_URL, getPipPath);
+  }
+
+  const install = await spawnAsync(pythonExe, [getPipPath], { env: pipEnv });
+  if (install.status !== 0) {
+    throw new Error(`pipインストールに失敗: ${install.stderr || install.stdout || 'unknown error'}`);
+  }
+}
+
+async function ensurePythonPackages(pythonExe, runtimeRoot, updateSplash) {
+  await ensurePipInstalled(pythonExe, runtimeRoot, updateSplash);
+
+  if (updateSplash) {
+    updateSplash('必要パッケージを確認中...', 70);
+  }
+
+  const pipEnv = { ...process.env, PIP_DISABLE_PIP_VERSION_CHECK: '1', PYTHONIOENCODING: 'utf-8' };
+  const requiredPackages = ['pyserial'];
+  for (let i = 0; i < requiredPackages.length; i++) {
+    const pkg = requiredPackages[i];
+    const progress = 75 + Math.floor(20 * ((i + 1) / requiredPackages.length));
+    const check = await spawnAsync(pythonExe, ['-m', 'pip', 'show', pkg], { env: pipEnv });
+    if (check.status !== 0) {
+      if (updateSplash) {
+        updateSplash(`パッケージ '${pkg}' をインストール中...`, progress - 5);
+      }
+      const install = await spawnAsync(pythonExe, ['-m', 'pip', 'install', pkg], { env: pipEnv });
+      if (install.status !== 0) {
+        throw new Error(`パッケージ '${pkg}' のインストールに失敗: ${install.stderr || 'unknown error'}`);
+      }
+    }
+    if (updateSplash) {
+      updateSplash(`パッケージ '${pkg}' 確認完了`, progress);
+    }
+  }
+}
+
+function resolvePythonCommand() {
+  const { pythonExe } = getPortablePythonPaths();
+  if (process.platform === 'win32') {
+    return fs.existsSync(pythonExe) ? pythonExe : null;
+  }
+  if (fs.existsSync(pythonExe)) return pythonExe;
+  return chooseSystemPython();
+}
+
+async function ensurePortablePython(updateSplash) {
+  if (process.platform !== 'win32') return;
+
+  const { runtimeRoot, pythonExe, versionMarker } = getPortablePythonPaths();
+  const currentVersion = readVersionMarker(versionMarker);
+  if (currentVersion === PORTABLE_PYTHON_VERSION && fs.existsSync(pythonExe)) {
+    return;
+  }
+
+  const url = getPortablePythonDownloadUrl();
+  if (!url) {
+    throw new Error('対応するポータブルPythonの配布が見つかりません。');
+  }
+
+  if (updateSplash) {
+    updateSplash('ポータブルPythonをダウンロード中...', 30);
+  }
+
+  const zipPath = path.join(app.getPath('temp'), `python-${PORTABLE_PYTHON_VERSION}-${process.arch}.zip`);
+  await downloadToFile(url, zipPath);
+
+  if (updateSplash) {
+    updateSplash('ポータブルPythonを展開中...', 45);
+  }
+
+  try {
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+  } catch (_) {
+    // ignore
+  }
+  fs.mkdirSync(runtimeRoot, { recursive: true });
+
+  const extract = await extractZip(zipPath, runtimeRoot);
+  if (!extract.success) {
+    throw new Error(`ポータブルPythonの展開に失敗: ${extract.error || 'unknown error'}`);
+  }
+
+  if (!fs.existsSync(pythonExe)) {
+    throw new Error('ポータブルPythonの展開後にpython.exeが見つかりません。');
+  }
+
+  if (updateSplash) {
+    updateSplash('ポータブルPythonを設定中...', 55);
+  }
+
+  enableEmbeddableSitePackages(runtimeRoot);
+  fs.writeFileSync(versionMarker, PORTABLE_PYTHON_VERSION, 'utf8');
+
+  try {
+    fs.unlinkSync(zipPath);
+  } catch (_) {
+    // ignore
+  }
+}
+
 async function ensureBlocklyCached() {
   const cachePath = getBlocklyCachePath();
   if (fs.existsSync(cachePath)) {
@@ -178,63 +394,42 @@ async function ensurePythonEnv(splashWindow) {
 
   pythonEnvPromise = (async () => {
     try {
-    const prepStart = Date.now();
-    const { venvRoot, pythonExe } = getVenvPaths();
-    
-    updateSplash('Python環境を確認中...', 10);
-    
-    // 既存チェック
-    if (!fs.existsSync(pythonExe)) {
-      updateSplash('システムPythonを検索中...', 20);
-      const sysPy = chooseSystemPython();
-      if (!sysPy) {
-        console.error('[ERROR] Python 3.x が見つかりません');
-        updateSplash('Python 3.x が見つかりません。起動を継続します。', 100);
+      const prepStart = Date.now();
+
+      updateSplash('Python環境を確認中...', 10);
+
+      if (process.platform === 'win32') {
+        updateSplash('ポータブルPythonを準備中...', 20);
+        await ensurePortablePython(updateSplash);
+      }
+
+      const { runtimeRoot } = getPortablePythonPaths();
+      const pythonCmd = resolvePythonCommand();
+      if (!pythonCmd) {
+        const errMsg = (process.platform === 'win32')
+          ? 'ポータブルPythonの準備に失敗しました。'
+          : 'Python 3.x が見つかりません。';
+        console.error('[ERROR] ' + errMsg);
+        updateSplash(errMsg + ' 起動を継続します。', 100);
         pythonEnvStatus = 'failed';
-        pythonEnvError = 'Python 3.x が見つかりません。';
+        pythonEnvError = errMsg;
         return;
       }
-      
-      updateSplash('仮想環境（venv）を作成中...（この処理には時間がかかります）', 40);
-      const mk = await spawnAsync(sysPy, ['-m', 'venv', venvRoot]);
-      if (mk.status !== 0) {
-        console.error('[ERROR] venv作成に失敗:', mk.stderr);
-        updateSplash('venvの作成に失敗しました。', 100);
-        pythonEnvStatus = 'failed';
-        pythonEnvError = `venv作成に失敗: ${mk.stderr || 'unknown error'}`;
-        return;
-      }
-    }
-    
-    // 必要パッケージのみ不足時にインストール
-    if (fs.existsSync(pythonExe)) {
-      updateSplash('必要パッケージを確認中...', 70);
-      const requiredPackages = ['pyserial'];
-      for (let i = 0; i < requiredPackages.length; i++) {
-        const pkg = requiredPackages[i];
-        const progress = 75 + Math.floor(20 * ((i + 1) / requiredPackages.length));
-        const check = await spawnAsync(pythonExe, ['-m', 'pip', 'show', pkg]);
-        if (check.status !== 0) {
-          updateSplash(`パッケージ '${pkg}' をインストール中...`, progress - 5);
-          const install = await spawnAsync(pythonExe, ['-m', 'pip', 'install', pkg]);
-          if (install.status !== 0) {
-            pythonEnvStatus = 'failed';
-            pythonEnvError = `パッケージ '${pkg}' のインストールに失敗: ${install.stderr || 'unknown error'}`;
-            updateSplash(`パッケージ '${pkg}' のインストールに失敗しました。`, 100);
-            return;
-          }
-        }
-        updateSplash(`パッケージ '${pkg}' 確認完了`, progress);
-      }
-    }
-    
-    pythonEnvStatus = 'ready';
-    console.log(`[PERF] ensurePythonEnv finished in ${Date.now() - prepStart}ms`);
-    updateSplash('起動準備完了', 100);
-  } catch (e) {
-    console.error('[ERROR] ensurePythonEnv中に例外:', e);
+
+      await ensurePythonPackages(
+        pythonCmd,
+        process.platform === 'win32' ? runtimeRoot : null,
+        updateSplash
+      );
+
+      pythonEnvStatus = 'ready';
+      console.log(`[PERF] ensurePythonEnv finished in ${Date.now() - prepStart}ms`);
+      updateSplash('起動準備完了', 100);
+    } catch (e) {
+      console.error('[ERROR] ensurePythonEnv中に例外:', e);
       pythonEnvStatus = 'failed';
       pythonEnvError = e.message;
+      updateSplash('Python環境準備に失敗しました。', 100);
     }
   })();
 
@@ -249,15 +444,9 @@ async function scanComPorts() {
       await pythonEnvPromise;
     }
 
-    const { pythonExe } = getVenvPaths();
-    let pythonCmd = null;
-    if (fs.existsSync(pythonExe)) {
-      pythonCmd = pythonExe;
-    } else {
-      pythonCmd = chooseSystemPython();
-    }
+    const pythonCmd = resolvePythonCommand();
     if (!pythonCmd) {
-      return { success: false, error: 'Pythonが見つかりません（pyserialで列挙不可）' };
+      return { success: false, error: 'Pythonランタイムが見つかりません（pyserialで列挙不可）' };
     }
     const script = [
       'import json',
@@ -596,7 +785,7 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
     if (pythonEnvPromise && pythonEnvStatus === 'preparing') {
       await pythonEnvPromise;
     }
-    if (pythonEnvStatus === 'failed' && !fs.existsSync(getVenvPaths().pythonExe)) {
+    if (pythonEnvStatus === 'failed' && !resolvePythonCommand()) {
       return { success: false, error: pythonEnvError || 'Python環境準備に失敗しました。' };
     }
 
@@ -604,16 +793,10 @@ ipcMain.handle('upload-to-device', async (event, assemblyCode, architecture) => 
       return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select から選択してください。' };
     }
 
-    // venv優先でPythonを選択
-    const { pythonExe } = getVenvPaths();
-    let pythonCmd = null;
-    if (fs.existsSync(pythonExe)) {
-      pythonCmd = pythonExe;
-    } else {
-      pythonCmd = chooseSystemPython();
-    }
+    // ポータブルPythonを選択
+    const pythonCmd = resolvePythonCommand();
     if (!pythonCmd) {
-      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+      return { success: false, error: 'Pythonランタイムが見つかりません。' };
     }
 
     const tmpDir = app.getPath('temp');
@@ -709,23 +892,17 @@ ipcMain.handle('fetch-registers', async () => {
     if (pythonEnvPromise && pythonEnvStatus === 'preparing') {
       await pythonEnvPromise;
     }
-    if (pythonEnvStatus === 'failed' && !fs.existsSync(getVenvPaths().pythonExe)) {
+    if (pythonEnvStatus === 'failed' && !resolvePythonCommand()) {
       return { success: false, error: pythonEnvError || 'Python環境準備に失敗しました。' };
     }
 
     if (!selectedComPort || !selectedComPort.device) {
       return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select で選択してください。' };
     }
-    // Pythonを選択（venv優先）
-    const { pythonExe } = getVenvPaths();
-    let pythonCmd = null;
-    if (fs.existsSync(pythonExe)) {
-      pythonCmd = pythonExe;
-    } else {
-      pythonCmd = chooseSystemPython();
-    }
+    // Pythonを選択（ポータブル優先）
+    const pythonCmd = resolvePythonCommand();
     if (!pythonCmd) {
-      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+      return { success: false, error: 'Pythonランタイムが見つかりません。' };
     }
 
     const loaderPath = app.isPackaged
@@ -764,7 +941,7 @@ ipcMain.handle('start-trace', async (event) => {
     if (pythonEnvPromise && pythonEnvStatus === 'preparing') {
       await pythonEnvPromise;
     }
-    if (pythonEnvStatus === 'failed' && !fs.existsSync(getVenvPaths().pythonExe)) {
+    if (pythonEnvStatus === 'failed' && !resolvePythonCommand()) {
       return { success: false, error: pythonEnvError || 'Python環境準備に失敗しました。' };
     }
 
@@ -775,15 +952,9 @@ ipcMain.handle('start-trace', async (event) => {
       return { success: false, error: 'COMポートが選択されていません。Sketch > Scan/Select で選択してください。' };
     }
 
-    const { pythonExe } = getVenvPaths();
-    let pythonCmd = null;
-    if (fs.existsSync(pythonExe)) {
-      pythonCmd = pythonExe;
-    } else {
-      pythonCmd = chooseSystemPython();
-    }
+    const pythonCmd = resolvePythonCommand();
     if (!pythonCmd) {
-      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。' };
+      return { success: false, error: 'Pythonランタイムが見つかりません。' };
     }
 
     const loaderPath = app.isPackaged
@@ -971,16 +1142,10 @@ ipcMain.handle('export-assembled-binary', async (event, assemblyCode, architectu
       const quote = s => (typeof s === 'string' && s.includes(' ')) ? `"${s}"` : `${s}`;
       return [quote(cmd), ...args.map(quote)].join(' ');
     };
-    // venv優先でPythonを選択
-    const { pythonExe } = getVenvPaths();
-    let pythonCmd = null;
-    if (fs.existsSync(pythonExe)) {
-      pythonCmd = pythonExe;
-    } else {
-      pythonCmd = chooseSystemPython();
-    }
+    // ポータブルPythonを選択
+    const pythonCmd = resolvePythonCommand();
     if (!pythonCmd) {
-      return { success: false, error: 'Pythonランタイムが見つかりません。Python 3.x をインストールしてください。', logs };
+      return { success: false, error: 'Pythonランタイムが見つかりません。', logs };
     }
 
     // 一時的なアセンブリファイルを作成（OSのtemp領域）

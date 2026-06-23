@@ -73,6 +73,8 @@ python hcxasm.py test/sample.asm -L ./include
 Prerequisites:
 
 - Node.js + npm
+- Windows: portable Python is downloaded on first launch (internet required)
+- macOS/Linux: Python 3.x
 
 Run:
 
